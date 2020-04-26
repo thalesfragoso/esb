@@ -9,10 +9,11 @@ use zerocopy::{AsBytes, FromBytes};
 /// Represents the payload from ESB protocol, its maximum length is determined by
 /// the generic param N. The protocol supports a payload with a maximum of 252 bytes.
 pub struct Payload<N: ArrayLength<MaybeUninit<u8>> + Unsigned> {
-    buf: GenericArray<MaybeUninit<u8>, N>,
-    len: u8,
-    no_ack: bool,
-    pipe: u8,
+    pub(crate) buf: GenericArray<MaybeUninit<u8>, N>,
+    pub(crate) len: u8,
+    // Should we take care of the pid or leave it to the user ?
+    pub(crate) pid_and_no_ack: u8,
+    pub(crate) pipe: u8,
 }
 
 impl<N: ArrayLength<MaybeUninit<u8>> + Unsigned> Payload<N> {
@@ -20,9 +21,10 @@ impl<N: ArrayLength<MaybeUninit<u8>> + Unsigned> Payload<N> {
     ///
     /// # Panics
     ///
-    /// This function will panic if the generic param `N` (payload length) is bigger than 252 bytes.
-    pub fn copy_from_slice(data: &[u8], no_ack: bool, pipe: u8) -> Self {
-        assert!(N::USIZE < 253);
+    /// This function will panic if the generic param `N` (payload length) is bigger than 252 bytes
+    /// or if the `pid` is bigger than 3.
+    pub fn copy_from_slice(data: &[u8], pid: u8, no_ack: bool, pipe: u8) -> Self {
+        assert!(N::USIZE < 253 && pid < 4);
         // NOTE(unsafe) Generic Array is the same as a [T; N] in memory
         #[allow(clippy::uninit_assumed_init)]
         let mut buf: GenericArray<MaybeUninit<u8>, N> =
@@ -40,7 +42,7 @@ impl<N: ArrayLength<MaybeUninit<u8>> + Unsigned> Payload<N> {
         Self {
             buf,
             len: count as u8,
-            no_ack,
+            pid_and_no_ack: (pid << 1) | if no_ack { 0x00 } else { 0x01 },
             pipe,
         }
     }
@@ -62,7 +64,7 @@ impl<N: ArrayLength<MaybeUninit<u8>> + Unsigned> DerefMut for Payload<N> {
         // NOTE(unsafe) Safe as it uses the internal length of valid data
         unsafe {
             slice::from_raw_parts_mut(
-                self.buf.as_mut_slice().as_ptr() as *mut _,
+                self.buf.as_mut_slice().as_mut_ptr() as *mut _,
                 self.len as usize,
             )
         }
@@ -111,6 +113,35 @@ impl Addresses {
     }
 }
 
+/// Type to be used by the ESB stack to perform radio transfers.
+pub struct Buffer<N: ArrayLength<u8> + Unsigned> {
+    pub(crate) inner: GenericArray<u8, N>,
+}
+
+impl<N: ArrayLength<u8> + Unsigned> Buffer<N> {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {
+            inner: GenericArray::default(),
+        }
+    }
+}
+
+impl<N: ArrayLength<u8> + Unsigned> Deref for Buffer<N> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_slice()
+    }
+}
+
+impl<N: ArrayLength<u8> + Unsigned> DerefMut for Buffer<N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut_slice()
+    }
+}
+
+/*
 #[derive(AsBytes, FromBytes)]
 #[repr(C)]
 pub struct Pcf {
@@ -136,17 +167,4 @@ impl Pcf {
         self.pid_noack & 0x01 != 0x01
     }
 }
-
-/// Type to be used by the ESB stack to perform radio transfers.
-pub struct Buffer<N: ArrayLength<u8> + Unsigned> {
-    pub(crate) inner: GenericArray<u8, N>,
-}
-
-impl<N: ArrayLength<u8> + Unsigned> Buffer<N> {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self {
-            inner: GenericArray::default(),
-        }
-    }
-}
+*/
