@@ -19,7 +19,8 @@ use core::{
 use generic_array::ArrayLength;
 
 use crate::packet::{Addresses, Buffer, Payload};
-use pac::RADIO;
+use bbqueue::framed::FrameGrantR;
+pub(crate) use pac::RADIO;
 
 pub struct ESBRadio {
     radio: RADIO,

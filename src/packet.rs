@@ -102,6 +102,7 @@ impl Addresses {
         prefixes1: [u8; 4],
         rf_channel: u8,
     ) -> Self {
+        // TODO(AJM): Move to a builder pattern here?
         assert!(rf_channel <= 100);
         Self {
             base0,
