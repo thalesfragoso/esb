@@ -21,10 +21,10 @@ impl<N: ArrayLength<MaybeUninit<u8>> + Unsigned> Payload<N> {
     ///
     /// # Panics
     ///
-    /// This function will panic if the generic param `N` (payload length) is bigger than 252 bytes
-    /// or if the `pid` is bigger than 3.
+    /// This function will panic if the generic param `N` (payload length) is bigger than 252 bytes,
+    /// the `pid` is bigger than 3 or the pipe bigger than 7.
     pub fn copy_from_slice(data: &[u8], pid: u8, no_ack: bool, pipe: u8) -> Self {
-        assert!(N::USIZE < 253 && pid < 4);
+        assert!(N::USIZE < 253 && pid < 4 && pipe < 8);
         // NOTE(unsafe) Generic Array is the same as a [T; N] in memory
         #[allow(clippy::uninit_assumed_init)]
         let mut buf: GenericArray<MaybeUninit<u8>, N> =
