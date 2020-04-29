@@ -3,7 +3,7 @@ use crate::peripherals::{ESBRadio, ESBTimer, RADIO};
 use crate::Error;
 use crate::State;
 use bbqueue::{
-    framed::{FrameConsumer, FrameProducer, FrameGrantW},
+    framed::{FrameConsumer, FrameProducer, FrameGrantW, FrameGrantR},
     ArrayLength, BBBuffer,
 };
 use core::result::Result;
@@ -94,7 +94,7 @@ where
     prod_to_app: FrameProducer<'static, IncomingLen>,
     cons_from_app: FrameConsumer<'static, OutgoingLen>,
     timer: Timer,
-    radio: ESBRadio,
+    radio: ESBRadio<IncomingLen, OutgoingLen>,
     state: State,
     addresses: Addresses,
     attempts: u8,
@@ -109,8 +109,61 @@ where
 
 }
 
-// |               ACTUAL DMA PART                                    | SW USE                        |
-// | length - 1 byte | pid_no_ack - 1 byte | payload - 1 to 252 bytes | rssi - 1 byte | pipe - 1 byte |
+// | SW USE                        |               ACTUAL DMA PART                                    |
+// | rssi - 1 byte | pipe - 1 byte | length - 1 byte | pid_no_ack - 1 byte | payload - 1 to 252 bytes |
+
+pub struct PayloadHeader {
+    rssi: u8,
+    pipe: u8,
+    length: u8,
+    pid_no_ack: u8,
+}
+
+pub type PhBytes = [u8; 4];
+impl PayloadHeader {
+
+    fn to_bytes(self) -> PhBytes {
+        [
+            self.rssi,
+            self.pipe,
+            self.length,
+            self.pid_no_ack,
+        ]
+    }
+
+    fn from_bytes(bytes: &PhBytes) -> Self {
+        Self {
+            rssi: bytes[Self::rssi_idx()],
+            pipe: bytes[Self::pipe_idx()],
+            length: bytes[Self::length_idx()],
+            pid_no_ack: bytes[Self::pid_no_ack_idx()],
+        }
+    }
+
+    const fn rssi_idx() -> usize {
+        0
+    }
+
+    const fn pipe_idx() -> usize {
+        1
+    }
+
+    const fn length_idx() -> usize {
+        2
+    }
+
+    const fn pid_no_ack_idx() -> usize {
+        3
+    }
+
+    const fn header_size() -> usize {
+        core::mem::size_of::<PhBytes>()
+    }
+}
+
+pub struct PayloadR<N: ArrayLength<u8>> {
+    pub grant: FrameGrantR<'static, N>,
+}
 
 pub struct PayloadW<N: ArrayLength<u8>> {
     pub grant: FrameGrantW<'static, N>,
@@ -121,16 +174,17 @@ where
     N: ArrayLength<u8>
 {
     pub fn new(
-        raw_grant: FrameGrantW<'static, N>,
-        pid_no_ack: u8,
-        pipe: u8,
-        rssi: u8, // doesn't mean anything when sending, only when receiving
+        mut raw_grant: FrameGrantW<'static, N>,
+        header: PayloadHeader,
     ) -> Self {
-        // length gets written on commit
+        raw_grant[..4].copy_from_slice(&header.to_bytes());
+        Self {
+            grant: raw_grant
+        }
+    }
 
-        // TODO(AJM), review multiple raw access, bounds checking
-        raw_grant[1] = pid_no_ack;
-        raw
+    pub fn pipe(&self) -> u8 {
+        self.grant[PayloadHeader::pipe_idx()]
     }
 }
 

@@ -2,6 +2,9 @@
 
 #![no_std]
 
+// james sorry
+#![allow(unused_imports, dead_code)]
+
 #[cfg(feature = "51")]
 use nrf51::RADIO;
 

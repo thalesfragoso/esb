@@ -22,8 +22,16 @@ use crate::packet::{Addresses, Buffer, Payload};
 use bbqueue::framed::FrameGrantR;
 pub(crate) use pac::RADIO;
 
-pub struct ESBRadio {
+use crate::james::{PayloadR, PayloadW};
+
+pub struct ESBRadio<OutgoingLen, IncomingLen>
+where
+    OutgoingLen: ArrayLength<u8>,
+    IncomingLen: ArrayLength<u8>,
+{
     radio: RADIO,
+    tx_grant: Option<PayloadR<OutgoingLen>>,
+    rx_grant: Option<PayloadW<IncomingLen>>,
 }
 
 const CRC_INIT: u32 = 0x0000_FFFF;
@@ -39,9 +47,17 @@ fn address_conversion(value: u32) -> u32 {
     value.reverse_bits()
 }
 
-impl ESBRadio {
+impl<OutgoingLen, IncomingLen> ESBRadio<OutgoingLen, IncomingLen>
+where
+    OutgoingLen: ArrayLength<u8>,
+    IncomingLen: ArrayLength<u8>,
+{
     pub(crate) fn new(radio: RADIO) -> Self {
-        ESBRadio { radio }
+        ESBRadio {
+            radio,
+            tx_grant: None,
+            rx_grant: None,
+        }
     }
 
     pub(crate) fn init(&mut self, max_payload: u8, addresses: &Addresses) {
@@ -137,7 +153,7 @@ impl ESBRadio {
 
     // TODO: Change to the bbqueue's Grants
     // Transmit a packet and setup interrupts
-    pub(crate) fn transmit(&mut self, tx_buf: &[u8], ack: bool, pipe: u8) {
+    pub(crate) fn transmit(&mut self, payload: crate::james::PayloadW<IncomingLen>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
             self.radio.shorts.modify(|_, w| w.disabled_rxen().enabled());
@@ -151,13 +167,17 @@ impl ESBRadio {
         }
         unsafe {
             // NOTE(unsafe) Pipe fits in 3 bits
-            self.radio.txaddress.write(|w| w.txaddress().bits(pipe));
+            self.radio
+                .txaddress
+                .write(|w| w.txaddress().bits(payload.pipe()));
             // NOTE(unsafe) Pipe only goes from 0 through 7
-            self.radio.rxaddresses.write(|w| w.bits(1 << pipe));
+            self.radio
+                .rxaddresses
+                .write(|w| w.bits(1 << payload.pipe()));
 
             self.radio
                 .packetptr
-                .write(|w| w.bits(tx_buf.as_ptr() as u32));
+                .write(|w| w.bits(payload.deref().as_ptr() as u32));
             self.radio.events_address.write(|w| w.bits(0));
             self.clear_disabled_event();
             self.clear_ready_event();
