@@ -22,7 +22,7 @@ use crate::packet::{Addresses, Buffer, Payload};
 use bbqueue::framed::FrameGrantR;
 pub(crate) use pac::RADIO;
 
-use crate::james::{PayloadR, PayloadW};
+use crate::payload::{PayloadR, PayloadW};
 
 pub struct ESBRadio<OutgoingLen, IncomingLen>
 where
@@ -153,7 +153,7 @@ where
 
     // TODO: Change to the bbqueue's Grants
     // Transmit a packet and setup interrupts
-    pub(crate) fn transmit(&mut self, payload: crate::james::PayloadW<IncomingLen>, ack: bool) {
+    pub(crate) fn transmit(&mut self, payload: PayloadW<IncomingLen>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
             self.radio.shorts.modify(|_, w| w.disabled_rxen().enabled());

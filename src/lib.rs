@@ -28,7 +28,11 @@ pub mod packet;
 pub mod peripherals;
 use packet::{Addresses, Payload};
 use peripherals::{ESBRadio, ESBTimer};
-pub(crate) mod james;
+
+pub(crate) mod app;
+pub(crate) mod buffer;
+pub(crate) mod irq;
+pub(crate) mod payload;
 
 // This should be made configurable later
 const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 48;
