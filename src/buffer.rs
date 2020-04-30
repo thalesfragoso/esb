@@ -1,14 +1,10 @@
-use crate::app::EsbApp;
-use crate::irq::EsbIrq;
-use crate::packet::Addresses;
-use crate::peripherals::{ESBRadio, ESBTimer, RADIO};
-use crate::Error;
-use crate::State;
-use bbqueue::{
-    framed::{FrameConsumer, FrameGrantR, FrameGrantW, FrameProducer},
-    ArrayLength, BBBuffer,
+use crate::{
+    app::{Addresses, EsbApp},
+    irq::EsbIrq,
+    peripherals::{ESBRadio, ESBTimer, RADIO},
+    Error, State,
 };
-use core::result::Result;
+use bbqueue::{ArrayLength, BBBuffer};
 
 // I'm gunna be const!
 pub struct EsbBuffer<OutgoingLen, IncomingLen>
@@ -16,8 +12,8 @@ where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
 {
-    pub app_to_radio_buf: BBBuffer<OutgoingLen>,
-    pub radio_to_app_buf: BBBuffer<IncomingLen>,
+    app_to_radio_buf: BBBuffer<OutgoingLen>,
+    radio_to_app_buf: BBBuffer<IncomingLen>,
     // Probably some more stuff?
 }
 
@@ -26,7 +22,8 @@ where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
 {
-    fn try_split<Timer: ESBTimer>(
+    #[allow(clippy::type_complexity)]
+    pub fn try_split<Timer: ESBTimer>(
         &'static self, // TODO(AJM): This seems odd
         timer: Timer,
         radio: RADIO,
@@ -63,7 +60,6 @@ where
             attempts: 0,
         };
 
-        // TODO: Set up radio?
         irq.radio.init(max_payload_bytes, &irq.addresses);
         irq.timer.init();
 

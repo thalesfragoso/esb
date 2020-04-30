@@ -1,12 +1,7 @@
-use crate::packet::Addresses;
-use crate::peripherals::{ESBRadio, ESBTimer, RADIO};
-use crate::Error;
-use crate::State;
 use bbqueue::{
-    framed::{FrameConsumer, FrameGrantR, FrameGrantW, FrameProducer},
-    ArrayLength, BBBuffer,
+    framed::{FrameGrantR, FrameGrantW},
+    ArrayLength,
 };
-use core::result::Result;
 
 // | SW USE                        |               ACTUAL DMA PART                                    |
 // | rssi - 1 byte | pipe - 1 byte | length - 1 byte | pid_no_ack - 1 byte | payload - 1 to 252 bytes |
@@ -20,7 +15,7 @@ pub struct PayloadHeader {
 
 pub type PhBytes = [u8; 4];
 impl PayloadHeader {
-    fn to_bytes(self) -> PhBytes {
+    pub fn into_bytes(self) -> PhBytes {
         [
             self.rssi,
             self.pipe,
@@ -30,13 +25,21 @@ impl PayloadHeader {
         ]
     }
 
-    fn from_bytes(bytes: &PhBytes) -> Self {
+    pub(crate) fn from_bytes(bytes: PhBytes) -> Self {
         Self {
             rssi: bytes[Self::rssi_idx()],
             pipe: bytes[Self::pipe_idx()],
             length: bytes[Self::length_idx()],
             pid_no_ack: bytes[Self::pid_no_ack_idx()],
         }
+    }
+
+    pub fn pid(&self) -> u8 {
+        self.pid_no_ack >> 1
+    }
+
+    pub fn no_ack(&self) -> bool {
+        self.pid_no_ack & 1 != 1
     }
 
     pub fn payload_len(&self) -> usize {
@@ -65,20 +68,20 @@ impl PayloadHeader {
         core::mem::size_of::<PhBytes>()
     }
 
-    const fn dma_payload_offset() -> isize {
+    const fn dma_payload_offset() -> usize {
         2
     }
 }
 
 pub struct PayloadR<N: ArrayLength<u8>> {
-    pub grant: FrameGrantR<'static, N>,
+    grant: FrameGrantR<'static, N>,
 }
 
 impl<N> PayloadR<N>
 where
     N: ArrayLength<u8>,
 {
-    pub fn new(raw_grant: FrameGrantR<'static, N>) -> Self {
+    pub(crate) fn new(raw_grant: FrameGrantR<'static, N>) -> Self {
         Self { grant: raw_grant }
     }
 
@@ -86,14 +89,11 @@ where
         const LEN: usize = PayloadHeader::header_size();
         let mut bytes = [0u8; LEN];
         bytes.copy_from_slice(&self.grant[..LEN]);
-        PayloadHeader::from_bytes(&bytes)
+        PayloadHeader::from_bytes(bytes)
     }
 
-    pub unsafe fn dma_pointer(&mut self) -> *const u8 {
-        self.grant
-            .deref()
-            .as_ptr()
-            .offset(PayloadHeader::dma_payload_offset())
+    pub fn dma_pointer(&self) -> *const u8 {
+        (&self.grant[PayloadHeader::dma_payload_offset()..]).as_ptr()
     }
 
     pub fn pipe(&self) -> u8 {
@@ -119,7 +119,7 @@ where
 }
 
 pub struct PayloadW<N: ArrayLength<u8>> {
-    pub grant: FrameGrantW<'static, N>,
+    grant: FrameGrantW<'static, N>,
 }
 
 impl<N> PayloadW<N>
@@ -130,7 +130,7 @@ where
         mut raw_grant: FrameGrantW<'static, N>,
         header: PayloadHeader, // HMMMMMM
     ) -> Self {
-        raw_grant[..PayloadHeader::header_size()].copy_from_slice(&header.to_bytes());
+        raw_grant[..PayloadHeader::header_size()].copy_from_slice(&header.into_bytes());
         Self { grant: raw_grant }
     }
 
@@ -139,14 +139,11 @@ where
     }
 
     pub(crate) fn update_header(&mut self, header: PayloadHeader) {
-        self.grant[..PayloadHeader::header_size()].copy_from_slice(&header.to_bytes());
+        self.grant[..PayloadHeader::header_size()].copy_from_slice(&header.into_bytes());
     }
 
-    pub unsafe fn dma_pointer(&mut self) -> *mut u8 {
-        self.grant
-            .deref_mut()
-            .as_mut_ptr()
-            .offset(PayloadHeader::dma_payload_offset())
+    pub fn dma_pointer(&mut self) -> *mut u8 {
+        (&mut self.grant[PayloadHeader::dma_payload_offset()..]).as_mut_ptr()
     }
 
     pub fn pipe(&self) -> u8 {
@@ -164,8 +161,7 @@ where
     }
 
     pub fn commit(mut self, used: usize) {
-        let max_payload_len = self.payload_len();
-        let payload_len = core::cmp::min(used, max_payload_len);
+        let payload_len = self.payload_len().min(used);
         self.grant[PayloadHeader::length_idx()] = payload_len as u8;
 
         self.grant

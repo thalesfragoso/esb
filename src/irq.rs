@@ -1,12 +1,12 @@
-use crate::packet::Addresses;
-use crate::peripherals::{ESBRadio, ESBTimer, RADIO};
-use crate::Error;
-use crate::State;
-use bbqueue::{
-    framed::{FrameConsumer, FrameGrantR, FrameGrantW, FrameProducer},
-    ArrayLength, BBBuffer,
+use crate::{
+    app::Addresses,
+    peripherals::{ESBRadio, ESBTimer},
+    State,
 };
-use core::result::Result;
+use bbqueue::{
+    framed::{FrameConsumer, FrameProducer},
+    ArrayLength,
+};
 
 /// Stuff for the interrupt side of things
 /// (like BleRadio)
@@ -19,7 +19,7 @@ where
     pub(crate) prod_to_app: FrameProducer<'static, IncomingLen>,
     pub(crate) cons_from_app: FrameConsumer<'static, OutgoingLen>,
     pub(crate) timer: Timer,
-    pub(crate) radio: ESBRadio<IncomingLen, OutgoingLen>,
+    pub(crate) radio: ESBRadio<OutgoingLen, IncomingLen>,
     pub(crate) state: State,
     pub(crate) addresses: Addresses,
     pub(crate) attempts: u8,

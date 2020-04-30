@@ -2,31 +2,9 @@
 
 #![no_std]
 // james sorry
-#![allow(unused_imports, dead_code)]
+#![allow(dead_code)]
 
-#[cfg(feature = "51")]
-use nrf51::RADIO;
-
-#[cfg(feature = "52810")]
-use nrf52810_pac::RADIO;
-
-#[cfg(feature = "52832")]
-use nrf52832_pac::RADIO;
-
-#[cfg(feature = "52840")]
-use nrf52840_pac::RADIO;
-
-use core::{mem::MaybeUninit, ops::Add};
-use generic_array::{
-    typenum::{consts::U2, Unsigned},
-    ArrayLength,
-};
-use heapless::spsc::{Consumer, Producer, SingleCore};
-
-pub mod packet;
 pub mod peripherals;
-use packet::{Addresses, Payload};
-use peripherals::{ESBRadio, ESBTimer};
 
 pub(crate) mod app;
 pub(crate) mod buffer;
@@ -52,6 +30,7 @@ pub enum Error {
     QueueFull,
     QueueEmpty,
     AlreadySplit,
+    InvalidParameters,
 }
 
 #[derive(PartialEq)]
