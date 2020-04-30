@@ -11,6 +11,12 @@ pub(crate) mod buffer;
 pub(crate) mod irq;
 pub(crate) mod payload;
 
+// Export crate relevant items
+pub use crate::{app::EsbApp, buffer::EsbBuffer, irq::EsbIrq, payload::EsbHeader};
+
+// Export dependency items necessary to create a backing structure
+pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
+
 // This should be made configurable later
 const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 48;
 const RETRANSMIT_DELAY_US_OFFSET: u16 = 62;
@@ -24,28 +30,21 @@ const RAMP_UP_TIME: u8 = 140;
 #[cfg(not(feature = "51"))]
 const RAMP_UP_TIME: u8 = 40;
 
+/// Crate-wide error type
 pub enum Error {
-    EOF,
-    InProgress,
+    // TODO(AJM): Do we still need these?
+    // EOF,
+    // InProgress,
+    /// Unable to add item to the queue, queue is full
     QueueFull,
-    QueueEmpty,
-    AlreadySplit,
-    InvalidParameters,
-}
 
-#[derive(PartialEq)]
-pub enum State {
-    Idle,
-    /// The radio is preparing for reception (in PTX)
-    RampUpRx,
-    /// The radio is preparing for transmission.
-    RampUpTx,
-    RampUpTxNoAck,
-    /// ESB on PTX state transmitting.
-    TransmitterTx,
-    TransmitterTxNoAck,
-    /// ESB on PTX state waiting for ack.
-    TransmitterWaitAck,
-    /// ESB in the PRX state listening for packets
-    Receiver,
+    /// Unable to pop item from the queue, queue is empty
+    QueueEmpty,
+
+    /// Unable to split to producer/consumer halves, the
+    /// buffer has already been split
+    AlreadySplit,
+
+    /// Values out of range
+    InvalidParameters,
 }

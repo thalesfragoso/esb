@@ -32,7 +32,7 @@ fn address_conversion(value: u32) -> u32 {
     value.reverse_bits()
 }
 
-pub struct ESBRadio<OutgoingLen, IncomingLen>
+pub struct EsbRadio<OutgoingLen, IncomingLen>
 where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
@@ -42,13 +42,13 @@ where
     rx_grant: Option<PayloadW<IncomingLen>>,
 }
 
-impl<OutgoingLen, IncomingLen> ESBRadio<OutgoingLen, IncomingLen>
+impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
 where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
 {
     pub(crate) fn new(radio: RADIO) -> Self {
-        ESBRadio {
+        EsbRadio {
             radio,
             tx_grant: None,
             rx_grant: None,
@@ -234,7 +234,7 @@ mod sealed {
 }
 
 /// Trait implemented for the nRF timer peripherals.
-pub trait ESBTimer: sealed::Sealed {
+pub trait EsbTimer: sealed::Sealed {
     /// Initialize the timer with a 1MHz rate.
     fn init(&mut self);
 
@@ -265,7 +265,7 @@ pub trait ESBTimer: sealed::Sealed {
 macro_rules! impl_timer {
     ( $($ty:ty),+ ) => {
         $(
-            impl ESBTimer for $ty {
+            impl EsbTimer for $ty {
                 fn init(&mut self) {
                     self.bitmode.write(|w| w.bitmode()._32bit());
                     // 2^4 = 16
