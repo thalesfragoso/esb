@@ -1,0 +1,49 @@
+on: [push, pull_request]
+
+name: Continuous integration
+
+jobs:
+  build-52832:
+    name: Compilation for the nRF52832
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+        include:
+          - rust: nightly
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          target: thumbv7em-none-eabihf
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --features=52832
+
+  build:
+    name: Compilation for the other supported microcontrollers
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+        include:
+          - rust: nightly
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+
+      - run: rustup target add thumbv7em-none-eabihf thumbv7em-none-eabi thumbv6m-none-eabi
+      - run: python tools/ci.py
