@@ -3,7 +3,7 @@ use crate::peripherals::{ESBRadio, ESBTimer, RADIO};
 use crate::Error;
 use crate::State;
 use bbqueue::{
-    framed::{FrameConsumer, FrameProducer, FrameGrantW, FrameGrantR},
+    framed::{FrameConsumer, FrameGrantR, FrameGrantW, FrameProducer},
     ArrayLength, BBBuffer,
 };
 use core::result::Result;
@@ -20,13 +20,10 @@ pub struct PayloadHeader {
 
 pub type PhBytes = [u8; 4];
 impl PayloadHeader {
-
     fn to_bytes(self) -> PhBytes {
-
         [
             self.rssi,
             self.pipe,
-
             // DO NOT REORDER!
             self.length,
             self.pid_no_ack,
@@ -40,6 +37,10 @@ impl PayloadHeader {
             length: bytes[Self::length_idx()],
             pid_no_ack: bytes[Self::pid_no_ack_idx()],
         }
+    }
+
+    pub fn payload_len(&self) -> usize {
+        usize::from(self.length)
     }
 
     const fn rssi_idx() -> usize {
@@ -60,7 +61,7 @@ impl PayloadHeader {
         3
     }
 
-    const fn header_size() -> usize {
+    pub(crate) const fn header_size() -> usize {
         core::mem::size_of::<PhBytes>()
     }
 
@@ -75,14 +76,10 @@ pub struct PayloadR<N: ArrayLength<u8>> {
 
 impl<N> PayloadR<N>
 where
-    N: ArrayLength<u8>
+    N: ArrayLength<u8>,
 {
-    pub fn new(
-        raw_grant: FrameGrantR<'static, N>,
-    ) -> Self {
-        Self {
-            grant: raw_grant
-        }
+    pub fn new(raw_grant: FrameGrantR<'static, N>) -> Self {
+        Self { grant: raw_grant }
     }
 
     pub fn get_header(&self) -> PayloadHeader {
@@ -112,7 +109,7 @@ use core::ops::{Deref, DerefMut};
 
 impl<N> Deref for PayloadR<N>
 where
-    N: ArrayLength<u8>
+    N: ArrayLength<u8>,
 {
     type Target = [u8];
 
@@ -127,30 +124,21 @@ pub struct PayloadW<N: ArrayLength<u8>> {
 
 impl<N> PayloadW<N>
 where
-    N: ArrayLength<u8>
+    N: ArrayLength<u8>,
 {
     pub(crate) fn new_from_app(
         mut raw_grant: FrameGrantW<'static, N>,
         header: PayloadHeader, // HMMMMMM
     ) -> Self {
         raw_grant[..PayloadHeader::header_size()].copy_from_slice(&header.to_bytes());
-        Self {
-            grant: raw_grant
-        }
+        Self { grant: raw_grant }
     }
 
-    pub(crate) fn new_from_radio(
-        raw_grant: FrameGrantW<'static, N>,
-    ) -> Self {
-        Self {
-            grant: raw_grant,
-        }
+    pub(crate) fn new_from_radio(raw_grant: FrameGrantW<'static, N>) -> Self {
+        Self { grant: raw_grant }
     }
 
-    pub(crate) fn update_header(
-        &mut self,
-        header: PayloadHeader
-    ) {
+    pub(crate) fn update_header(&mut self, header: PayloadHeader) {
         self.grant[..PayloadHeader::header_size()].copy_from_slice(&header.to_bytes());
     }
 
@@ -171,7 +159,8 @@ where
 
     pub fn commit_all(self) {
         let payload_len = self.payload_len();
-        self.grant.commit(payload_len + PayloadHeader::header_size())
+        self.grant
+            .commit(payload_len + PayloadHeader::header_size())
     }
 
     pub fn commit(mut self, used: usize) {
@@ -179,13 +168,14 @@ where
         let payload_len = core::cmp::min(used, max_payload_len);
         self.grant[PayloadHeader::length_idx()] = payload_len as u8;
 
-        self.grant.commit(payload_len + PayloadHeader::header_size())
+        self.grant
+            .commit(payload_len + PayloadHeader::header_size())
     }
 }
 
 impl<N> Deref for PayloadW<N>
 where
-    N: ArrayLength<u8>
+    N: ArrayLength<u8>,
 {
     type Target = [u8];
 

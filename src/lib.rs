@@ -1,7 +1,6 @@
 //! Rust implementation of Nordic's Enhanced ShockBurst
 
 #![no_std]
-
 // james sorry
 #![allow(unused_imports, dead_code)]
 
@@ -50,6 +49,7 @@ const RAMP_UP_TIME: u8 = 40;
 pub enum Error {
     EOF,
     InProgress,
+    QueueFull,
     QueueEmpty,
     AlreadySplit,
 }

@@ -1,14 +1,14 @@
+use crate::app::EsbApp;
+use crate::irq::EsbIrq;
 use crate::packet::Addresses;
 use crate::peripherals::{ESBRadio, ESBTimer, RADIO};
 use crate::Error;
 use crate::State;
 use bbqueue::{
-    framed::{FrameConsumer, FrameProducer, FrameGrantW, FrameGrantR},
+    framed::{FrameConsumer, FrameGrantR, FrameGrantW, FrameProducer},
     ArrayLength, BBBuffer,
 };
 use core::result::Result;
-use crate::app::EsbApp;
-use crate::irq::EsbIrq;
 
 // I'm gunna be const!
 pub struct EsbBuffer<OutgoingLen, IncomingLen>

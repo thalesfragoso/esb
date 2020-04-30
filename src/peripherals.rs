@@ -20,7 +20,7 @@ use generic_array::ArrayLength;
 
 use crate::packet::{Addresses, Buffer, Payload};
 use bbqueue::framed::FrameGrantR;
-pub(crate) use pac::RADIO;
+pub(crate) use pac::{Interrupt, NVIC, RADIO};
 
 use crate::payload::{PayloadR, PayloadW};
 

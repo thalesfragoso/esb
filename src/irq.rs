@@ -3,7 +3,7 @@ use crate::peripherals::{ESBRadio, ESBTimer, RADIO};
 use crate::Error;
 use crate::State;
 use bbqueue::{
-    framed::{FrameConsumer, FrameProducer, FrameGrantW, FrameGrantR},
+    framed::{FrameConsumer, FrameGrantR, FrameGrantW, FrameProducer},
     ArrayLength, BBBuffer,
 };
 use core::result::Result;
@@ -31,5 +31,4 @@ where
     IncomingLen: ArrayLength<u8>,
     Timer: ESBTimer,
 {
-
 }
