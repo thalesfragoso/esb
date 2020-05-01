@@ -10,23 +10,17 @@ use nrf52832_pac as pac;
 #[cfg(feature = "52840")]
 use nrf52840_pac as pac;
 
-use core::{
-    mem::MaybeUninit,
-    ops::{Deref, DerefMut},
-    ptr,
-    sync::atomic::{compiler_fence, Ordering},
+use bbqueue::ArrayLength;
+use core::sync::atomic::{compiler_fence, Ordering};
+
+use crate::{
+    app::Addresses,
+    payload::{PayloadR, PayloadW},
 };
-use generic_array::ArrayLength;
-
-use crate::packet::{Addresses, Buffer, Payload};
-use pac::RADIO;
-
-pub struct ESBRadio {
-    radio: RADIO,
-}
+pub(crate) use pac::{Interrupt, NVIC, RADIO};
 
 const CRC_INIT: u32 = 0x0000_FFFF;
-const CRC_POLY: u32 = 0x0000_11021;
+const CRC_POLY: u32 = 0x0001_1021;
 
 #[inline]
 fn bytewise_bit_swap(value: u32) -> u32 {
@@ -38,9 +32,27 @@ fn address_conversion(value: u32) -> u32 {
     value.reverse_bits()
 }
 
-impl ESBRadio {
+pub struct EsbRadio<OutgoingLen, IncomingLen>
+where
+    OutgoingLen: ArrayLength<u8>,
+    IncomingLen: ArrayLength<u8>,
+{
+    radio: RADIO,
+    tx_grant: Option<PayloadR<OutgoingLen>>,
+    rx_grant: Option<PayloadW<IncomingLen>>,
+}
+
+impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
+where
+    OutgoingLen: ArrayLength<u8>,
+    IncomingLen: ArrayLength<u8>,
+{
     pub(crate) fn new(radio: RADIO) -> Self {
-        ESBRadio { radio }
+        EsbRadio {
+            radio,
+            tx_grant: None,
+            rx_grant: None,
+        }
     }
 
     pub(crate) fn init(&mut self, max_payload: u8, addresses: &Addresses) {
@@ -136,7 +148,7 @@ impl ESBRadio {
 
     // TODO: Change to the bbqueue's Grants
     // Transmit a packet and setup interrupts
-    pub(crate) fn transmit(&mut self, tx_buf: &[u8], ack: bool, pipe: u8) {
+    pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
             self.radio.shorts.modify(|_, w| w.disabled_rxen().enabled());
@@ -150,13 +162,17 @@ impl ESBRadio {
         }
         unsafe {
             // NOTE(unsafe) Pipe fits in 3 bits
-            self.radio.txaddress.write(|w| w.txaddress().bits(pipe));
+            self.radio
+                .txaddress
+                .write(|w| w.txaddress().bits(payload.pipe()));
             // NOTE(unsafe) Pipe only goes from 0 through 7
-            self.radio.rxaddresses.write(|w| w.bits(1 << pipe));
+            self.radio
+                .rxaddresses
+                .write(|w| w.bits(1 << payload.pipe()));
 
             self.radio
                 .packetptr
-                .write(|w| w.bits(tx_buf.as_ptr() as u32));
+                .write(|w| w.bits(payload.dma_pointer() as u32));
             self.radio.events_address.write(|w| w.bits(0));
             self.clear_disabled_event();
             self.clear_ready_event();
@@ -168,18 +184,20 @@ impl ESBRadio {
 
             self.radio.tasks_txen.write(|w| w.bits(1));
         }
+        self.tx_grant = Some(payload);
     }
 
     // TODO: Change to bbqueue's Grant
     // Must be called after the end of TX if the user requested for an ack
-    pub(crate) fn prepare_for_ack(&mut self, rx_buf: &mut [u8]) {
+    pub(crate) fn prepare_for_ack(&mut self, mut rx_buf: PayloadW<IncomingLen>) {
         // We need a compiler fence here because the DMA will automatically start listening for
         // packets after the ramp-up is completed
         // "Preceding reads and writes cannot be moved past subsequent writes."
         compiler_fence(Ordering::Release);
         self.radio
             .packetptr
-            .write(|w| unsafe { w.bits(rx_buf.as_ptr() as u32) });
+            .write(|w| unsafe { w.bits(rx_buf.dma_pointer() as u32) });
+        self.rx_grant = Some(rx_buf);
         // this already fired
         self.radio
             .shorts
@@ -188,11 +206,11 @@ impl ESBRadio {
 
     // TODO: Change to the bbqueue's Grants
     // Returns true if the ack was received successfully
-    pub(crate) fn check_ack(&mut self, grant: &[u8]) -> bool {
+    pub(crate) fn check_ack(&mut self) -> bool {
         let ret = self.radio.crcstatus.read().crcstatus().is_crcok();
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
-
+        // TODO: commit the grant if everything is ok
         ret
     }
 
@@ -216,7 +234,7 @@ mod sealed {
 }
 
 /// Trait implemented for the nRF timer peripherals.
-pub trait ESBTimer: sealed::Sealed {
+pub trait EsbTimer: sealed::Sealed {
     /// Initialize the timer with a 1MHz rate.
     fn init(&mut self);
 
@@ -247,7 +265,7 @@ pub trait ESBTimer: sealed::Sealed {
 macro_rules! impl_timer {
     ( $($ty:ty),+ ) => {
         $(
-            impl ESBTimer for $ty {
+            impl EsbTimer for $ty {
                 fn init(&mut self) {
                     self.bitmode.write(|w| w.bitmode()._32bit());
                     // 2^4 = 16
