@@ -186,6 +186,20 @@ where
         (&mut self.grant[EsbHeader::dma_payload_offset()..]).as_mut_ptr()
     }
 
+    /// Update the pipe field.
+    ///
+    /// Pipe must be between 0 and 7, inclusive.
+    #[inline]
+    pub(crate) fn set_pipe(&mut self, pipe: u8) {
+        self.grant[EsbHeader::pipe_idx()] = pipe;
+    }
+
+    /// Update the rssi field.
+    #[inline]
+    pub(crate) fn set_rssi(&mut self, rssi: u8) {
+        self.grant[EsbHeader::rssi_idx()] = rssi;
+    }
+
     /// An accessor function to get the pipe id of the current grant
     pub fn pipe(&self) -> u8 {
         self.grant[EsbHeader::pipe_idx()]

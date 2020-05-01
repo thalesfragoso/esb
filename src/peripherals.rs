@@ -146,7 +146,22 @@ where
         self.radio.intenclr.write(|w| w.ready().set_bit());
     }
 
-    // TODO: Change to the bbqueue's Grants
+    // Disables the radio and the `radio disabled` interrupt
+    pub(crate) fn stop(&mut self) {
+        self.radio.intenclr.write(|w| w.disabled().set_bit());
+        self.radio.tasks_disable.write(|w| unsafe { w.bits(1) });
+
+        // Wait for the disable event to kick in, to make sure that the `task_disable` write won't
+        // trigger an interrupt
+        while self.radio.events_disabled.read().bits() == 0 {}
+        self.clear_disabled_event();
+
+        // "Subsequent reads and writes cannot be moved ahead of preceding reads."
+        compiler_fence(Ordering::Acquire);
+    }
+
+    // --------------- PTX methods --------------- //
+
     // Transmit a packet and setup interrupts
     pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
         if ack {
@@ -187,8 +202,20 @@ where
         self.tx_grant = Some(payload);
     }
 
-    // TODO: Change to bbqueue's Grant
-    // Must be called after the end of TX if the user requested for an ack
+    // Must be called after the end of TX if the user did not request an ack
+    pub(crate) fn finish_tx_no_ack(&mut self) {
+        // We could use `Acquire` ordering if could prove that a read occurred
+        // "No re-ordering of reads and writes across this point is allowed."
+        compiler_fence(Ordering::SeqCst);
+
+        // Transmission completed, release packet. If we are here we should always have the tx_grant
+        if let Some(grant) = self.tx_grant.take() {
+            grant.release();
+        }
+    }
+
+    // Must be called after the end of TX if the user requested for an ack.
+    // Timers must be set accordingly by the upper stack
     pub(crate) fn prepare_for_ack(&mut self, mut rx_buf: PayloadW<IncomingLen>) {
         // We need a compiler fence here because the DMA will automatically start listening for
         // packets after the ramp-up is completed
@@ -202,30 +229,33 @@ where
         self.radio
             .shorts
             .modify(|_, w| w.disabled_rxen().disabled());
+
+        // We don't release the packet here because we may need to retransmit
     }
 
-    // TODO: Change to the bbqueue's Grants
     // Returns true if the ack was received successfully
+    // The upper stack is responsible for checking and disabling the timeouts
     pub(crate) fn check_ack(&mut self) -> bool {
         let ret = self.radio.crcstatus.read().crcstatus().is_crcok();
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
-        // TODO: commit the grant if everything is ok
+
+        if ret {
+            if let (Some(tx_grant), Some(mut rx_grant)) =
+                (self.tx_grant.take(), self.rx_grant.take())
+            {
+                let pipe = tx_grant.pipe();
+                tx_grant.release();
+
+                let rssi = self.radio.rssisample.read().rssisample().bits();
+                rx_grant.set_pipe(pipe);
+                rx_grant.set_rssi(rssi);
+                rx_grant.commit_all();
+            } else {
+                unreachable!()
+            }
+        }
         ret
-    }
-
-    // Disables the radio and the `radio disabled` interrupt
-    pub(crate) fn stop(&mut self) {
-        self.radio.intenclr.write(|w| w.disabled().set_bit());
-        self.radio.tasks_disable.write(|w| unsafe { w.bits(1) });
-
-        // Wait for the disable event to kick in, to make sure that the `task_disable` write won't
-        // trigger an interrupt
-        while self.radio.events_disabled.read().bits() == 0 {}
-        self.clear_disabled_event();
-
-        // "Subsequent reads and writes cannot be moved ahead of preceding reads."
-        compiler_fence(Ordering::Acquire);
     }
 }
 
