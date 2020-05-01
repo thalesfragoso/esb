@@ -3,16 +3,31 @@ on: [push, pull_request]
 name: Continuous integration
 
 jobs:
-  build-52832:
-    name: Compilation for the nRF52832
+  build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust:
-          - stable
         include:
-          - rust: nightly
+          - feature: 51,
+            target: thumbv6m-none-eabi
+            rust: stable
+          - feature: 51,
+            target: thumbv6m-none-eabi
+            rust: nightly
             experimental: true
+          - feature: 52810,
+            target: thumbv7em-none-eabi
+            rust: stable
+          - feature: 52832,
+            target: thumbv7em-none-eabihf
+            rust: stable
+          - feature: 52832,
+            target: thumbv7em-none-eabihf
+            rust: nightly
+            experimental: true
+          - feature: 52840,
+            target: thumbv7em-none-eabihf
+            rust: stable
 
     steps:
       - uses: actions/checkout@v2
@@ -20,30 +35,9 @@ jobs:
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
-          target: thumbv7em-none-eabihf
-          override: true
+      - run: rustup target add thumbv7em-none-eabihf thumbv7em-none-eabi thumbv6m-none-eabi
+
       - uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --features=52832
-
-  build:
-    name: Compilation for the other supported microcontrollers
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust:
-          - stable
-        include:
-          - rust: nightly
-            experimental: true
-
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-
-      - run: rustup target add thumbv7em-none-eabihf thumbv7em-none-eabi thumbv6m-none-eabi
-      - run: python tools/ci.py
+          args: --features=${{ matrix.feature }} --target=${{ matrix.target }}
