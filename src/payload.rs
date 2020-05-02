@@ -328,7 +328,8 @@ where
     /// it will be truncated.
     pub fn update_header(&mut self, mut header: EsbHeader) {
         // TODO(AJM): Technically, we could drop the current grant, and request a larger one
-        // here, and it would totally work. However for now, let's just truncate
+        // here, and it would totally work. However for now, let's just truncate, because growing
+        // the buffer would first have to be implemented in BBQueue.
 
         // `length` must always be 0..=252 (checked by constructor), so `u8` cast is
         // appropriate here
