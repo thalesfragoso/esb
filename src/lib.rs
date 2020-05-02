@@ -12,7 +12,12 @@ pub(crate) mod irq;
 pub(crate) mod payload;
 
 // Export crate relevant items
-pub use crate::{app::EsbApp, buffer::EsbBuffer, irq::EsbIrq, payload::EsbHeader};
+pub use crate::{
+    app::EsbApp,
+    buffer::EsbBuffer,
+    irq::EsbIrq,
+    payload::{EsbHeader, EsbHeaderBuilder},
+};
 
 // Export dependency items necessary to create a backing structure
 pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
@@ -31,12 +36,16 @@ const RAMP_UP_TIME: u8 = 140;
 const RAMP_UP_TIME: u8 = 40;
 
 /// Crate-wide error type
+#[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     // TODO(AJM): Do we still need these?
     // EOF,
     // InProgress,
     /// Unable to add item to the queue, queue is full
     QueueFull,
+
+    /// Grant already in progress
+    GrantInProgress,
 
     /// Unable to pop item from the queue, queue is empty
     QueueEmpty,
@@ -47,4 +56,7 @@ pub enum Error {
 
     /// Values out of range
     InvalidParameters,
+
+    /// Internal Error
+    InternalError,
 }
