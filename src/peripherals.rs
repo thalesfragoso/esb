@@ -32,6 +32,13 @@ fn address_conversion(value: u32) -> u32 {
     value.reverse_bits()
 }
 
+pub(crate) enum RxPayloadState {
+    Ack,
+    NoAck,
+    Repeated,
+    BadCRC,
+}
+
 pub struct EsbRadio<OutgoingLen, IncomingLen>
 where
     OutgoingLen: ArrayLength<u8>,
@@ -40,6 +47,8 @@ where
     radio: RADIO,
     tx_grant: Option<PayloadR<OutgoingLen>>,
     rx_grant: Option<PayloadW<IncomingLen>>,
+    last_crc: [u16; 8],
+    last_pid: [u8; 8],
 }
 
 impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
@@ -52,10 +61,16 @@ where
             radio,
             tx_grant: None,
             rx_grant: None,
+            last_crc: [0; 8],
+            last_pid: [0; 8],
         }
     }
 
     pub(crate) fn init(&mut self, max_payload: u8, addresses: &Addresses) {
+        // Disables all interrupts
+        self.radio
+            .intenclr
+            .write(|w| unsafe { w.bits(0xFFFF_FFFF) });
         self.radio.mode.write(|w| w.mode().nrf_2mbit());
         let len_bits = if max_payload <= 32 { 6 } else { 8 };
         // Convert addresses to remain compatible with nRF24L devices
@@ -148,6 +163,9 @@ where
 
     // Disables the radio and the `radio disabled` interrupt
     pub(crate) fn stop(&mut self) {
+        self.radio
+            .shorts
+            .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().disabled());
         self.radio.intenclr.write(|w| w.disabled().set_bit());
         self.radio.tasks_disable.write(|w| unsafe { w.bits(1) });
 
@@ -162,7 +180,9 @@ where
 
     // --------------- PTX methods --------------- //
 
-    // Transmit a packet and setup interrupts
+    // Transmit a packet and setup interrupts.
+    // If the an ack is requested, the `ready` interrupt will be enabled and the upper stack must
+    // check for this condition and perfom the necessary actions.
     pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
@@ -256,6 +276,140 @@ where
             }
         }
         ret
+    }
+
+    // --------------- PRX methods --------------- //
+
+    // Start listening for packets and setup necessary shorts and interrupts
+    pub(crate) fn start_receiving(&mut self, mut rx_buf: PayloadW<IncomingLen>, enabled_pipes: u8) {
+        // Start TX after receiving a packet as it might need an ack
+        self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
+
+        self.radio.intenset.write(|w| w.disabled().set_bit());
+        self.radio
+            .rxaddresses
+            .write(|w| unsafe { w.bits(enabled_pipes as u32) });
+
+        unsafe {
+            self.radio
+                .packetptr
+                .write(|w| w.bits(rx_buf.dma_pointer() as u32));
+            self.radio.events_address.write(|w| w.bits(0));
+            self.clear_disabled_event();
+            self.clear_ready_event();
+            self.clear_end_event();
+            //self.radio.events_payload.write(|w| w.bits(0)); do we need this ? Probably not
+
+            // "Preceding reads and writes cannot be moved past subsequent writes."
+            compiler_fence(Ordering::Release);
+
+            self.radio.tasks_rxen.write(|w| w.bits(1));
+        }
+        self.rx_grant = Some(rx_buf);
+    }
+
+    // Check the received payload.
+    pub(crate) fn check_packet(&mut self, payload: PayloadR<OutgoingLen>) -> RxPayloadState {
+        if self.radio.crcstatus.read().crcstatus().is_crcerror() {
+            // Bad CRC, clear events and restart RX.
+            self.stop();
+            self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
+            self.radio.intenset.write(|w| w.disabled().set_bit());
+            // "Preceding reads and writes cannot be moved past subsequent writes."
+            compiler_fence(Ordering::Release);
+
+            self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
+            // We can safely drop the payload, it will return to the queue
+            return RxPayloadState::BadCRC;
+        }
+        // "Subsequent reads and writes cannot be moved ahead of preceding reads."
+        compiler_fence(Ordering::Acquire);
+
+        let pipe = self.radio.rxmatch.read().rxmatch().bits() as usize;
+        let crc = self.radio.rxcrc.read().rxcrc().bits() as u16;
+        let (pid, ack) = if let Some(grant) = &self.rx_grant {
+            (grant.pid(), !grant.no_ack())
+        } else {
+            unreachable!()
+        };
+
+        if ack {
+            // This is a bit risky, the radio is turning around since before the beginning of the
+            // method, we should have enough time if the Radio interrupt is top priority, otherwise
+            // we might have a problem, should we disable the `disabled_txen` shorcut ? We might
+            // have problems to acknowledge consistently if we do so.
+            self.radio
+                .txaddress
+                .write(|w| unsafe { w.txaddress().bits(pipe as u8) });
+
+            // "Preceding reads and writes cannot be moved past subsequent writes."
+            compiler_fence(Ordering::Release);
+            self.radio
+                .packetptr
+                .write(|w| unsafe { w.bits(payload.dma_pointer() as u32) });
+            self.tx_grant = Some(payload);
+
+            // Disables the shortcut for `txen`, we already hit that.
+            // Enables the shortcut for `rxen` to turn around to rx after the end of the ack
+            // transmission.
+            self.radio
+                .shorts
+                .modify(|_, w| w.disabled_txen().disabled().disabled_rxen().enabled());
+        } else {
+            self.stop();
+        }
+
+        if (self.last_crc[pipe] == crc) && (self.last_pid[pipe] == pid) {
+            return RxPayloadState::Repeated;
+        }
+        self.last_crc[pipe] = crc;
+        self.last_pid[pipe] = pid;
+
+        if let Some(mut grant) = self.rx_grant.take() {
+            let rssi = self.radio.rssisample.read().rssisample().bits();
+            grant.set_rssi(rssi);
+            grant.set_pipe(pipe as u8);
+            grant.commit_all();
+            if ack {
+                RxPayloadState::Ack
+            } else {
+                RxPayloadState::NoAck
+            }
+        } else {
+            unreachable!()
+        }
+    }
+
+    // Must be called after the end of the ack transmission.
+    pub(crate) fn complete_rx_ack(&mut self, mut rx_buf: PayloadW<IncomingLen>) {
+        // "No re-ordering of reads and writes across this point is allowed."
+        compiler_fence(Ordering::SeqCst);
+
+        self.radio
+            .packetptr
+            .write(|w| unsafe { w.bits(rx_buf.dma_pointer() as u32) });
+        self.rx_grant = Some(rx_buf);
+        // Disables the shortcut for `rxen`, we already hit that.
+        // Enables the shortcut for `txen` to turn around to tx after receiving a packet
+        // transmission.
+        self.radio
+            .shorts
+            .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().enabled());
+    }
+
+    // Must be called after `check_packet` returns `RxPayloadState::NoAck`.
+    pub(crate) fn complete_rx_no_ack(&mut self, mut rx_buf: PayloadW<IncomingLen>) {
+        self.radio
+            .packetptr
+            .write(|w| unsafe { w.bits(rx_buf.dma_pointer() as u32) });
+        self.rx_grant = Some(rx_buf);
+
+        self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
+        self.radio.intenset.write(|w| w.disabled().set_bit());
+        // "Preceding reads and writes cannot be moved past subsequent writes."
+        compiler_fence(Ordering::Release);
+
+        self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
     }
 }
 
