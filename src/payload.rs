@@ -1,3 +1,4 @@
+use crate::Error;
 use bbqueue::{
     framed::{FrameGrantR, FrameGrantW},
     ArrayLength,
@@ -7,9 +8,140 @@ use core::ops::{Deref, DerefMut};
 // | SW USE                        |               ACTUAL DMA PART                                    |
 // | rssi - 1 byte | pipe - 1 byte | length - 1 byte | pid_no_ack - 1 byte | payload - 1 to 252 bytes |
 
+/// A builder for an `EsbHeader` structure
+///
+/// The builder is converted into an `EsbHeader` by calling the
+/// `check()` method.
+///
+/// ## Example
+///
+/// ```rust
+/// use esb::EsbHeaderBuilder;
+///
+/// let header_result = EsbHeaderBuilder::default()
+///     .max_payload(252)
+///     .pid(0)
+///     .pipe(0)
+///     .no_ack(true)
+///     .check();
+///
+/// assert!(header_result.is_ok());
+/// ```
+///
+/// ## Default Header Contents
+///
+/// By default, the following settings will be used:
+///
+/// | Field     | Default Value |
+/// | :---      | :---          |
+/// | pid       | 0             |
+/// | no_ack    | true          |
+/// | length    | 0             |
+/// | pipe      | 0             |
+///
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct EsbHeaderBuilder(EsbHeader);
+
+impl Default for EsbHeaderBuilder {
+    fn default() -> Self {
+        EsbHeaderBuilder(EsbHeader {
+            rssi: 0,
+            pid_no_ack: 0,
+            length: 0,
+            pipe: 0,
+        })
+    }
+}
+
+impl EsbHeaderBuilder {
+    /// Set the pipe. Must be in the range 0..=7.
+    pub fn pipe(mut self, pipe: u8) -> Self {
+        self.0.pipe = pipe;
+        self
+    }
+
+    /// Set the max payload. Must be in the range 0..=252.
+    pub fn max_payload(mut self, max_payload: u8) -> Self {
+        self.0.length = max_payload;
+        self
+    }
+
+    /// Enable/disable acknowledgment
+    pub fn no_ack(mut self, no_ack: bool) -> Self {
+        // TODO(AJM): We should probably just call this
+        // method "ack", or "enable_ack", because "no_ack"
+        // is really confusing.
+        if no_ack {
+            self.0.pid_no_ack &= 0b1111_1110;
+        } else {
+            self.0.pid_no_ack |= 0b0000_0001;
+        }
+        self
+    }
+
+    /// Set the pid. Must be in the range 0..=3.
+    pub fn pid(mut self, pid: u8) -> Self {
+        // TODO(AJM): Do we want the user to set the pid? isn't this an
+        // internal "retry" counter?
+        self.0.pid_no_ack &= 0b0000_0001;
+        self.0.pid_no_ack |= pid << 1;
+        self
+    }
+
+    /// Finalize the header.
+    ///
+    /// If the set parameters are out of range, an error will
+    /// be returned.
+    pub fn check(self) -> Result<EsbHeader, Error> {
+        let bad_length = self.0.length > 252;
+        let bad_pipe = self.0.pipe > 7;
+
+        // This checks if "pid" >= 3, where pid_no_ack is pid << 1.
+        let bad_pid = self.0.pid_no_ack > 0b0000_0111;
+
+        if bad_length || bad_pid || bad_pipe {
+            return Err(Error::InvalidParameters);
+        }
+
+        Ok(self.0)
+    }
+}
+
 /// The non-payload portion of an ESB packet
+///
+/// This is typically used to create a Packet Grant using methods
+/// from the [`EsbApp`](struct.EsbApp.html) or [`EsbIrq`](struct.EsbIrq.html)
+/// interfaces.
+///
+/// ## Example
+///
+/// ```rust
+/// use esb::EsbHeader;
+///
+/// let builder_result = EsbHeader::build()
+///     .max_payload(252)
+///     .pid(0)
+///     .pipe(1)
+///     .no_ack(true)
+///     .check();
+///
+/// let new_result = EsbHeader::new(
+///     252,
+///     0,
+///     1,
+///     true,
+/// );
+///
+/// assert_eq!(builder_result, new_result);
+/// ```
+///
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EsbHeader {
     rssi: u8,
+    // TODO(AJM): We can probably combine the 3 bits of pipe
+    // into the pid_no_ack field to save another byte of space.
+    // We just need to mask it out in EsbIrq before handing it
+    // to the radio to process.
     pipe: u8,
     length: u8,
     pid_no_ack: u8,
@@ -19,6 +151,30 @@ pub struct EsbHeader {
 pub(crate) struct HeaderBytes(pub(crate) [u8; 4]);
 
 impl EsbHeader {
+    /// Create a new packet header using a builder pattern
+    ///
+    /// See the docs for [`EsbBuilder`](struct.EsbHeaderBuilder.html) for more
+    /// information.
+    pub fn build() -> EsbHeaderBuilder {
+        EsbHeaderBuilder::default()
+    }
+
+    /// Create a new packet header
+    ///
+    /// Notes on valid values:
+    ///
+    /// * `max_payload_length` must be between 0 and 252 bytes, inclusive.
+    /// * `pid` must be between 0 and 3, inclusive.
+    /// * `pipe` must be between 0 and 7, inclusive.
+    pub fn new(max_payload_length: u8, pid: u8, pipe: u8, no_ack: bool) -> Result<Self, Error> {
+        EsbHeaderBuilder::default()
+            .max_payload(max_payload_length)
+            .pid(pid)
+            .pipe(pipe)
+            .no_ack(no_ack)
+            .check()
+    }
+
     /// convert into a packed representation meant for internal
     /// data queuing purposes
     fn into_bytes(self) -> HeaderBytes {
@@ -163,7 +319,21 @@ where
     ///
     /// This can be used to modify the pipe, length, etc. of the
     /// packet.
-    pub fn update_header(&mut self, header: EsbHeader) {
+    ///
+    /// ## NOTE:
+    ///
+    /// The `length` of the packet can not be increased, only shrunk. If a larger
+    /// payload is needed, you must drop the current payload grant, and obtain a new
+    /// one. If the new header has a larger `length` than the current `length`, then
+    /// it will be truncated.
+    pub fn update_header(&mut self, mut header: EsbHeader) {
+        // TODO(AJM): Technically, we could drop the current grant, and request a larger one
+        // here, and it would totally work. However for now, let's just truncate, because growing
+        // the buffer would first have to be implemented in BBQueue.
+
+        // `length` must always be 0..=252 (checked by constructor), so `u8` cast is
+        // appropriate here
+        header.length = header.length.min(self.payload_len() as u8);
         self.grant[..EsbHeader::header_size()].copy_from_slice(&header.into_bytes().0);
     }
 

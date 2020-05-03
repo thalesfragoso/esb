@@ -1,9 +1,9 @@
-use crate::payload::{EsbHeader, HeaderBytes, PayloadR, PayloadW};
+use crate::payload::{EsbHeader, PayloadR, PayloadW};
 use crate::peripherals::{Interrupt, NVIC};
 use crate::Error;
 use bbqueue::{
     framed::{FrameConsumer, FrameProducer},
-    ArrayLength,
+    ArrayLength, Error as BbqError,
 };
 
 /// This is the primary Application-side interface.
@@ -32,34 +32,25 @@ where
     /// When space is available, this function will return a [`PayloadW`],
     /// which can be written into for data to be sent over the radio. If
     /// the given parameters are incorrect, or if no space is available,
-    /// an error will be returned.
+    /// or if a grant is already in progress, an error will be returned.
     ///
-    /// Notes on valid values:
+    /// ## Notes
     ///
-    /// * `payload_length` must be between 0 and 252 bytes, inclusive.
-    /// * `pid` must be between 0 and 3, inclusive.
-    /// * `pipe` must be between 0 and 7, inclusive.
-    pub fn grant_packet(
-        &mut self,
-
-        // TODO(AJM): @thalesfragoso, why don't we have the user just
-        // provide a header here? It would make the interface less complex.
-        // We could also provide a builder for the header.
-        payload_length: u8,
-        pid: u8,
-        pipe: u8,
-        no_ack: bool,
-    ) -> Result<PayloadW<OutgoingLen>, Error> {
-        if payload_length > 252 || pid > 3 || pipe > 7 {
-            return Err(Error::InvalidParameters);
-        }
-        // This is weird, Nordic uses the `no-ack` bit as "active-low"
-        let pid_no_ack = pid << 1 | if no_ack { 0x00 } else { 0x01 };
-        let header = EsbHeader::from_bytes(HeaderBytes([0, pipe, payload_length, pid_no_ack]));
-        let grant = self
+    /// Once a grant has been created, the maximum size of the grant can not
+    /// be increased, only shrunk. If a larger grant is needed, you must
+    /// `drop` the old grant, and create a new one.
+    ///
+    /// Only one grant may be active at a time.
+    pub fn grant_packet(&mut self, header: EsbHeader) -> Result<PayloadW<OutgoingLen>, Error> {
+        let grant_result = self
             .prod_to_radio
-            .grant(header.payload_len() + EsbHeader::header_size())
-            .map_err(|_| Error::QueueFull)?;
+            .grant(header.payload_len() + EsbHeader::header_size());
+
+        let grant = grant_result.map_err(|err| match err {
+            BbqError::GrantInProgress => Error::GrantInProgress,
+            BbqError::InsufficientSize => Error::QueueFull,
+            _ => Error::InternalError,
+        })?;
         Ok(PayloadW::new_from_app(grant, header))
     }
 
