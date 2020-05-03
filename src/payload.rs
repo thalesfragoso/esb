@@ -35,7 +35,7 @@ use core::ops::{Deref, DerefMut};
 /// | Field     | Default Value |
 /// | :---      | :---          |
 /// | pid       | 0             |
-/// | no_ack    | false         |
+/// | no_ack    | true          |
 /// | length    | 0             |
 /// | pipe      | 0             |
 ///
