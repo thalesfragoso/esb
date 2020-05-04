@@ -21,6 +21,7 @@ pub(crate) use pac::{Interrupt, NVIC, RADIO};
 
 const CRC_INIT: u32 = 0x0000_FFFF;
 const CRC_POLY: u32 = 0x0001_1021;
+const NUM_PIPES: usize = 8;
 
 #[inline]
 fn bytewise_bit_swap(value: u32) -> u32 {
@@ -47,8 +48,8 @@ where
     radio: RADIO,
     tx_grant: Option<PayloadR<OutgoingLen>>,
     rx_grant: Option<PayloadW<IncomingLen>>,
-    last_crc: [u16; 8],
-    last_pid: [u8; 8],
+    last_crc: [u16; NUM_PIPES],
+    last_pid: [u8; NUM_PIPES],
 }
 
 impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
@@ -61,8 +62,8 @@ where
             radio,
             tx_grant: None,
             rx_grant: None,
-            last_crc: [0; 8],
-            last_pid: [0; 8],
+            last_crc: [0; NUM_PIPES],
+            last_pid: [0; NUM_PIPES],
         }
     }
 
@@ -137,10 +138,16 @@ where
         }
     }
 
-    // Clears the End event to not retrigger the interrupt
+    // Clears the Disabled event to not retrigger the interrupt
     #[inline]
     pub(crate) fn clear_disabled_event(&mut self) {
         self.radio.events_disabled.write(|w| unsafe { w.bits(0) });
+    }
+
+    // Checks the Disabled event
+    #[inline]
+    pub(crate) fn check_disabled_event(&mut self) -> bool {
+        self.radio.events_disabled.read().bits() == 1
     }
 
     // Clears the End event to not retrigger the interrupt
@@ -261,19 +268,21 @@ where
         compiler_fence(Ordering::Acquire);
 
         if ret {
-            if let (Some(tx_grant), Some(mut rx_grant)) =
-                (self.tx_grant.take(), self.rx_grant.take())
-            {
-                let pipe = tx_grant.pipe();
-                tx_grant.release();
+            let (tx_grant, mut rx_grant) =
+                (self.tx_grant.take().unwrap(), self.rx_grant.take().unwrap());
 
-                let rssi = self.radio.rssisample.read().rssisample().bits();
-                rx_grant.set_pipe(pipe);
-                rx_grant.set_rssi(rssi);
-                rx_grant.commit_all();
-            } else {
-                unreachable!()
-            }
+            let pipe = tx_grant.pipe();
+            tx_grant.release();
+
+            let rssi = self.radio.rssisample.read().rssisample().bits();
+            rx_grant.set_pipe(pipe);
+            rx_grant.set_rssi(rssi);
+            rx_grant.commit_all();
+        } else {
+            // Drop `tx_grant` and `rx_grant` so the upper stack can pass them again in the next
+            // `transmit` and `prepare_for_ack`
+            self.tx_grant.take();
+            self.rx_grant.take();
         }
         ret
     }
@@ -327,11 +336,8 @@ where
 
         let pipe = self.radio.rxmatch.read().rxmatch().bits() as usize;
         let crc = self.radio.rxcrc.read().rxcrc().bits() as u16;
-        let (pid, ack) = if let Some(grant) = &self.rx_grant {
-            (grant.pid(), !grant.no_ack())
-        } else {
-            unreachable!()
-        };
+        let rx_grant = self.rx_grant.as_ref().unwrap();
+        let (pid, ack) = (rx_grant.pid(), !rx_grant.no_ack());
 
         if ack {
             // This is a bit risky, the radio is turning around since before the beginning of the
@@ -365,18 +371,15 @@ where
         self.last_crc[pipe] = crc;
         self.last_pid[pipe] = pid;
 
-        if let Some(mut grant) = self.rx_grant.take() {
-            let rssi = self.radio.rssisample.read().rssisample().bits();
-            grant.set_rssi(rssi);
-            grant.set_pipe(pipe as u8);
-            grant.commit_all();
-            if ack {
-                RxPayloadState::Ack
-            } else {
-                RxPayloadState::NoAck
-            }
+        let mut grant = self.rx_grant.take().unwrap();
+        let rssi = self.radio.rssisample.read().rssisample().bits();
+        grant.set_rssi(rssi);
+        grant.set_pipe(pipe as u8);
+        grant.commit_all();
+        if ack {
+            RxPayloadState::Ack
         } else {
-            unreachable!()
+            RxPayloadState::NoAck
         }
     }
 

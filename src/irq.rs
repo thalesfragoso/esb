@@ -16,12 +16,13 @@ pub enum State {
     RampUpRx,
     /// The radio is preparing for transmission.
     RampUpTx,
-    RampUpTxNoAck,
     /// ESB on PTX state transmitting.
     TransmitterTx,
     TransmitterTxNoAck,
     /// ESB on PTX state waiting for ack.
     TransmitterWaitAck,
+    /// ESB on PTX state waiting for the retransmit timeout.
+    TransmitterWaitRetransmit,
     /// ESB in the PRX state listening for packets
     Receiver,
 }
