@@ -10,7 +10,7 @@ use nrf52832_pac as pac;
 #[cfg(feature = "52840")]
 use nrf52840_pac as pac;
 
-use bbqueue::ArrayLength;
+use bbqueue::{framed::FrameConsumer, ArrayLength};
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use crate::{
@@ -321,23 +321,12 @@ where
     }
 
     // Check the received packet.
-    //
-    // # Safety
-    //
-    // This function is non-reentrant
-    pub(crate) unsafe fn check_packet(
+    pub(crate) fn check_packet(
         &mut self,
-        mut payload: Option<PayloadR<OutgoingLen>>,
+        consumer: &mut FrameConsumer<'static, OutgoingLen>,
     ) -> RxPayloadState {
         // If the user didn't provide a packet to send, we will fall back to this empty ack packet
         static FALLBACK_ACK: [u8; 2] = [0, 0];
-
-        // We can't know if our last ack was received before entering this method, and because
-        // bbqueue doesn't support having multiple grants at the same time, we will need to cache
-        // the last packet, otherwise we would only be able to send user provided packets at a
-        // maximum rate of one packet per two transactions, even when all our acks are being
-        // received. This doesn't seem like the perfect solution.
-        static mut CACHE: [u8; 254] = [0u8; 254];
 
         if self.radio.crcstatus.read().crcstatus().is_crcerror() {
             // Bad CRC, clear events and restart RX.
@@ -348,7 +337,7 @@ where
             compiler_fence(Ordering::Release);
 
             // NOTE(unsafe) 1 is a valid value to write to this register
-            self.radio.tasks_rxen.write(|w| w.bits(1));
+            self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
             // We can safely drop the payload, it will return to the queue
             return RxPayloadState::BadCRC;
         }
@@ -370,18 +359,29 @@ where
             // NOTE(unsafe) Any byte value is valid for this register.
             self.radio
                 .txaddress
-                .write(|w| w.txaddress().bits(pipe as u8));
+                .write(|w| unsafe { w.txaddress().bits(pipe as u8) });
 
             let mut dma_pointer = FALLBACK_ACK.as_ptr() as *const u8 as u32;
 
             if repeated {
                 if pipe == self.cached_pipe as usize {
-                    dma_pointer = CACHE.as_ptr() as *const u8 as u32;
+                    if let Some(grant) = &self.tx_grant {
+                        dma_pointer = grant.dma_pointer() as u32;
+                    }
                 }
-            } else if let Some(grant) = payload.take() {
-                if grant.pipe() == pipe as u8 {
-                    dma_pointer = grant.dma_pointer() as u32;
-                    self.tx_grant = Some(grant);
+            } else {
+                // Our last ack packet was received, release it and ask for a new one
+                if let Some(grant) = self.tx_grant.take() {
+                    grant.release();
+                }
+
+                // "No re-ordering of reads and writes across this point is allowed."
+                compiler_fence(Ordering::SeqCst);
+
+                if let Some(grant) = consumer.read() {
+                    let payload = PayloadR::new(grant);
+                    dma_pointer = payload.dma_pointer() as u32;
+                    self.tx_grant = Some(payload);
                 }
             }
 
@@ -389,7 +389,9 @@ where
             compiler_fence(Ordering::Release);
 
             // NOTE(unsafe) Any u32 is valid to write to this register.
-            self.radio.packetptr.write(|w| w.bits(dma_pointer));
+            self.radio
+                .packetptr
+                .write(|w| unsafe { w.bits(dma_pointer) });
 
             // Disables the shortcut for `txen`, we already hit that.
             // Enables the shortcut for `rxen` to turn around to rx after the end of the ack
@@ -397,12 +399,6 @@ where
             self.radio
                 .shorts
                 .modify(|_, w| w.disabled_txen().disabled().disabled_rxen().enabled());
-
-            // Cache the packet
-            if let Some(grant) = self.tx_grant.as_ref() {
-                grant.copy_to_dma_buffer(&mut CACHE);
-                self.cached_pipe = pipe as u8;
-            }
         } else {
             self.stop();
         }
@@ -416,6 +412,7 @@ where
         }
         self.last_crc[pipe] = crc;
         self.last_pid[pipe] = pid;
+        self.cached_pipe = pipe as u8;
 
         let mut grant = self.rx_grant.take().unwrap();
         let rssi = self.radio.rssisample.read().rssisample().bits();
@@ -447,10 +444,8 @@ where
             .packetptr
             .write(|w| unsafe { w.bits(dma_pointer) });
 
-        // Release the transmitted packet if we have an user provided one
-        if let Some(tx_grant) = self.tx_grant.take() {
-            tx_grant.release();
-        }
+        // We don't release the `tx_grant` here, because we don't know if it was really received.
+
         // Disables the shortcut for `rxen`, we already hit that.
         // Enables the shortcut for `txen` to turn around to tx after receiving a packet
         // transmission.

@@ -2,10 +2,7 @@ use bbqueue::{
     framed::{FrameGrantR, FrameGrantW},
     ArrayLength,
 };
-use core::{
-    ops::{Deref, DerefMut},
-    ptr,
-};
+use core::ops::{Deref, DerefMut};
 
 // | SW USE                        |               ACTUAL DMA PART                                    |
 // | rssi - 1 byte | pipe - 1 byte | length - 1 byte | pid_no_ack - 1 byte | payload - 1 to 252 bytes |
@@ -124,17 +121,6 @@ where
     /// This includes part of the header, as well as the full payload
     pub(crate) fn dma_pointer(&self) -> *const u8 {
         (&self.grant[EsbHeader::dma_payload_offset()..]).as_ptr()
-    }
-
-    /// Copies the necessary data required by the Radio DMA.
-    pub(crate) fn copy_to_dma_buffer(&self, buffer: &mut [u8; 254]) {
-        // Payload size plus length and `pid_no_ack` fields.
-        let count = self.grant[EsbHeader::length_idx()] + 2;
-        // NOTE(unsafe) Safe based on the check above and the fact that the payload can't be bigger
-        // than 252 bytes.
-        unsafe {
-            ptr::copy_nonoverlapping(self.dma_pointer(), buffer.as_mut_ptr(), count as usize);
-        }
     }
 
     /// An accessor function for the pipe of the current grant
