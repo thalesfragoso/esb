@@ -48,7 +48,7 @@ where
 
         let grant = grant_result.map_err(|err| match err {
             BbqError::GrantInProgress => Error::GrantInProgress,
-            BbqError::InsufficientSize => Error::QueueFull,
+            BbqError::InsufficientSize => Error::OutgoingQueueFull,
             _ => Error::InternalError,
         })?;
         Ok(PayloadW::new_from_app(grant, header))

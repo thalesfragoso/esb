@@ -144,7 +144,7 @@ where
     // Clears the Disabled event to not retrigger the interrupt
     #[inline]
     pub(crate) fn clear_disabled_event(&mut self) {
-        self.radio.events_disabled.write(|w| unsafe { w.bits(0) });
+        self.radio.events_disabled.reset();
     }
 
     // Checks the Disabled event
@@ -156,13 +156,19 @@ where
     // Clears the End event to not retrigger the interrupt
     #[inline]
     pub(crate) fn clear_end_event(&mut self) {
-        self.radio.events_end.write(|w| unsafe { w.bits(0) });
+        self.radio.events_end.reset();
+    }
+
+    // Checks the Ready event
+    #[inline]
+    pub(crate) fn check_ready_event(&self) -> bool {
+        self.radio.events_ready.read().bits() == 1
     }
 
     // Clears the Ready event to not retrigger the interrupt
     #[inline]
     pub(crate) fn clear_ready_event(&mut self) {
-        self.radio.events_ready.write(|w| unsafe { w.bits(0) });
+        self.radio.events_ready.reset();
     }
 
     // Disables Ready interrupt
@@ -171,12 +177,18 @@ where
         self.radio.intenclr.write(|w| w.ready().set_bit());
     }
 
+    // Disables Disabled interrupt
+    #[inline]
+    pub(crate) fn disable_disabled_interrupt(&mut self) {
+        self.radio.intenclr.write(|w| w.disabled().set_bit());
+    }
+
     // Disables the radio and the `radio disabled` interrupt
     pub(crate) fn stop(&mut self) {
         self.radio
             .shorts
             .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().disabled());
-        self.radio.intenclr.write(|w| w.disabled().set_bit());
+        self.disable_disabled_interrupt();
         self.radio.tasks_disable.write(|w| unsafe { w.bits(1) });
 
         // Wait for the disable event to kick in, to make sure that the `task_disable` write won't
@@ -186,6 +198,10 @@ where
 
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
+
+        // Drop grants we might have
+        self.tx_grant.take();
+        self.rx_grant.take();
     }
 
     // --------------- PTX methods --------------- //
@@ -242,6 +258,9 @@ where
         if let Some(grant) = self.tx_grant.take() {
             grant.release();
         }
+
+        // It will be enabled again in a call to `transmit`.
+        self.disable_disabled_interrupt();
     }
 
     // Must be called after the end of TX if the user requested for an ack.
@@ -490,29 +509,30 @@ pub trait EsbTimer: sealed::Sealed {
     fn set_interrupt_retransmit(&mut self, micros: u16);
 
     /// Acknowledges the retransmit interrupt.
-    fn clear_interrupt_retransmit(&mut self);
+    fn clear_interrupt_retransmit();
 
-    /// Returns whether the retransmit interrupt is currently pending.
-    fn is_retransmit_pending(&self) -> bool;
+    /// Returns whether the retransmit interrupt is currently pending, atomically.
+    fn is_retransmit_pending() -> bool;
 
     /// Configures the timer's interrupt used for the acknowledge timeout, to fire after a given
     /// time in micro seconds.
     fn set_interrupt_ack(&mut self, micros: u16);
 
     /// Acknowledges the ack timeout interrupt.
-    fn clear_interrupt_ack(&mut self);
+    fn clear_interrupt_ack();
 
     /// Returns whether the ack timeout interrupt is currently pending.
-    fn is_ack_pending(&self) -> bool;
+    fn is_ack_pending() -> bool;
 
-    /// Stops the timer.
-    fn stop(&mut self);
+    /// Stops the timer, atomically.
+    fn stop();
 }
 
 macro_rules! impl_timer {
     ( $($ty:ty),+ ) => {
         $(
             impl EsbTimer for $ty {
+                #[inline]
                 fn init(&mut self) {
                     self.bitmode.write(|w| w.bitmode()._32bit());
                     // 2^4 = 16
@@ -523,6 +543,7 @@ macro_rules! impl_timer {
                 // CC[0] will be used for the retransmit timeout and CC[1] will be used for the ack
                 // timeout
 
+                #[inline]
                 fn set_interrupt_retransmit(&mut self, micros: u16) {
                     self.cc[0].write(|w| unsafe { w.bits(micros as u32) });
                     self.events_compare[0].reset();
@@ -533,16 +554,23 @@ macro_rules! impl_timer {
                     self.tasks_start.write(|w| unsafe { w.bits(1) });
                 }
 
-                fn clear_interrupt_retransmit(&mut self) {
-                    self.intenclr.write(|w| w.compare0().clear());
-                    self.events_compare[0].reset();
+                #[inline]
+                fn clear_interrupt_retransmit() {
+                    // NOTE(unsafe) This will be used for atomic operations, only
+                    let timer = unsafe { &*Self::ptr() };
 
-                    self.stop();
+                    timer.intenclr.write(|w| w.compare0().clear());
+                    timer.events_compare[0].reset();
+
+                    Self::stop();
                 }
 
                 #[inline]
-                fn is_retransmit_pending(&self) -> bool {
-                    self.events_compare[0].read().bits() == 1u32
+                fn is_retransmit_pending() -> bool {
+                    // NOTE(unsafe) This will be used for atomic operations, only
+                    let timer = unsafe { &*Self::ptr() };
+
+                    timer.events_compare[0].read().bits() == 1u32
                 }
 
                 fn set_interrupt_ack(&mut self, micros: u16) {
@@ -555,19 +583,29 @@ macro_rules! impl_timer {
                     self.intenset.write(|w| w.compare1().set());
                 }
 
-                fn clear_interrupt_ack(&mut self) {
-                    self.intenclr.write(|w| w.compare1().clear());
-                    self.events_compare[1].reset();
+                #[inline]
+                fn clear_interrupt_ack() {
+                    // NOTE(unsafe) This will be used for atomic operations, only
+                    let timer = unsafe { &*Self::ptr() };
+
+                    timer.intenclr.write(|w| w.compare1().clear());
+                    timer.events_compare[1].reset();
                 }
 
                 #[inline]
-                fn is_ack_pending(&self) -> bool {
-                    self.events_compare[1].read().bits() == 1u32
+                fn is_ack_pending() -> bool {
+                    // NOTE(unsafe) This will be used for atomic operations, only
+                    let timer = unsafe { &*Self::ptr() };
+
+                    timer.events_compare[1].read().bits() == 1u32
                 }
 
                 #[inline]
-                fn stop(&mut self) {
-                    self.tasks_stop.write(|w| unsafe { w.bits(1) });
+                fn stop() {
+                    // NOTE(unsafe) This will be used for atomic operations, only
+                    let timer = unsafe { &*Self::ptr() };
+
+                    timer.tasks_stop.write(|w| unsafe { w.bits(1) });
                 }
             }
 
