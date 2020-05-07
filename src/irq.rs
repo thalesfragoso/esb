@@ -178,7 +178,7 @@ where
                 if disabled_event {
                     // We got an ack, check it
                     Timer::clear_interrupt_ack();
-                    if self.radio.check_ack() {
+                    if self.radio.check_ack()? {
                         // Everything went fine, `clear_interrupt_retransmit` also resets and stops
                         // the timer
                         Timer::clear_interrupt_retransmit();
@@ -218,12 +218,13 @@ where
             State::Receiver => {
                 debug_assert!(disabled_event);
                 // We got a packet, check it
-                match self.radio.check_packet(&mut self.cons_from_app) {
+                match self.radio.check_packet(&mut self.cons_from_app)? {
                     // Do nothing, the radio will return to rx
                     RxPayloadState::BadCRC => {}
                     RxPayloadState::NoAck => {
                         self.prepare_receiver(|this, grant| {
                             this.radio.complete_rx_no_ack(Some(grant));
+                            Ok(())
                         })?;
                     }
                     RxPayloadState::RepeatedNoAck => {
@@ -243,14 +244,15 @@ where
                 // We finished transmitting the acknowledgement, get ready for the next packet
                 self.prepare_receiver(|this, grant| {
                     // This goes back to rx
-                    this.radio.complete_rx_ack(Some(grant));
+                    this.radio.complete_rx_ack(Some(grant))?;
                     this.state = State::Receiver;
+                    Ok(())
                 })?;
             }
             State::TransmittingRepeatedAck => {
                 debug_assert!(disabled_event);
                 // This goes back to rx
-                self.radio.complete_rx_ack(None);
+                self.radio.complete_rx_ack(None)?;
                 self.state = State::Receiver;
             }
             State::IdleRx => {
@@ -273,6 +275,7 @@ where
         self.prepare_receiver(|this, grant| {
             this.radio.start_receiving(grant, this.config.enabled_pipes);
             this.state = State::Receiver;
+            Ok(())
         })
     }
 
@@ -304,14 +307,14 @@ where
 
     fn prepare_receiver<F>(&mut self, f: F) -> Result<(), Error>
     where
-        F: FnOnce(&mut Self, PayloadW<IncomingLen>),
+        F: FnOnce(&mut Self, PayloadW<IncomingLen>) -> Result<(), Error>,
     {
         if let Ok(grant) = self
             .prod_to_app
             .grant(MAX_PACKET_SIZE)
             .map(PayloadW::new_from_radio)
         {
-            f(self, grant);
+            f(self, grant)?;
             Ok(())
         } else {
             self.radio.stop();

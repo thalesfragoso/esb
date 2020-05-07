@@ -63,7 +63,7 @@ pub enum Error {
     /// Values out of range
     InvalidParameters,
 
-    /// Internal Error
+    /// Internal Error, if you encounter this error, please report it, it is a bug
     InternalError,
 
     /// [EsbIrq](struct.EsbIrq.html) reached the maximum number of attempts to send a packet that

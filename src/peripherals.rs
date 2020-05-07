@@ -16,6 +16,7 @@ use core::sync::atomic::{compiler_fence, Ordering};
 use crate::{
     app::Addresses,
     payload::{PayloadR, PayloadW},
+    Error,
 };
 pub(crate) use pac::{Interrupt, NVIC, RADIO};
 
@@ -285,14 +286,16 @@ where
 
     // Returns true if the ack was received successfully
     // The upper stack is responsible for checking and disabling the timeouts
-    pub(crate) fn check_ack(&mut self) -> bool {
+    pub(crate) fn check_ack(&mut self) -> Result<bool, Error> {
         let ret = self.radio.crcstatus.read().crcstatus().is_crcok();
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
 
         if ret {
-            let (tx_grant, mut rx_grant) =
-                (self.tx_grant.take().unwrap(), self.rx_grant.take().unwrap());
+            let (tx_grant, mut rx_grant) = (
+                self.tx_grant.take().ok_or(Error::InternalError)?,
+                self.rx_grant.take().ok_or(Error::InternalError)?,
+            );
 
             let pipe = tx_grant.pipe();
             tx_grant.release();
@@ -307,7 +310,7 @@ where
             self.tx_grant.take();
             self.rx_grant.take();
         }
-        ret
+        Ok(ret)
     }
 
     // --------------- PRX methods --------------- //
@@ -344,7 +347,7 @@ where
     pub(crate) fn check_packet(
         &mut self,
         consumer: &mut FrameConsumer<'static, OutgoingLen>,
-    ) -> RxPayloadState {
+    ) -> Result<RxPayloadState, Error> {
         // If the user didn't provide a packet to send, we will fall back to this empty ack packet
         static FALLBACK_ACK: [u8; 2] = [0, 0];
 
@@ -358,14 +361,14 @@ where
 
             // NOTE(unsafe) 1 is a valid value to write to this register
             self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
-            return RxPayloadState::BadCRC;
+            return Ok(RxPayloadState::BadCRC);
         }
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
 
         let pipe = self.radio.rxmatch.read().rxmatch().bits() as usize;
         let crc = self.radio.rxcrc.read().rxcrc().bits() as u16;
-        let rx_grant = self.rx_grant.as_ref().unwrap();
+        let rx_grant = self.rx_grant.as_ref().ok_or(Error::InternalError)?;
         let (pid, ack) = (rx_grant.pid(), !rx_grant.no_ack());
         let repeated = (self.last_crc[pipe] == crc) && (self.last_pid[pipe] == pid);
 
@@ -425,36 +428,42 @@ where
 
         if repeated {
             if ack {
-                return RxPayloadState::RepeatedAck;
+                return Ok(RxPayloadState::RepeatedAck);
             } else {
-                return RxPayloadState::RepeatedNoAck;
+                return Ok(RxPayloadState::RepeatedNoAck);
             }
         }
         self.last_crc[pipe] = crc;
         self.last_pid[pipe] = pid;
         self.cached_pipe = pipe as u8;
 
-        let mut grant = self.rx_grant.take().unwrap();
+        let mut grant = self.rx_grant.take().ok_or(Error::InternalError)?;
         let rssi = self.radio.rssisample.read().rssisample().bits();
         grant.set_rssi(rssi);
         grant.set_pipe(pipe as u8);
         grant.commit_all();
         if ack {
-            RxPayloadState::Ack
+            Ok(RxPayloadState::Ack)
         } else {
-            RxPayloadState::NoAck
+            Ok(RxPayloadState::NoAck)
         }
     }
 
     // Must be called after the end of the ack transmission.
     // `rx_buf` must only be `None` if a previous call to `check_packet` returned `RepeatedAck`
-    pub(crate) fn complete_rx_ack(&mut self, mut rx_buf: Option<PayloadW<IncomingLen>>) {
+    pub(crate) fn complete_rx_ack(
+        &mut self,
+        mut rx_buf: Option<PayloadW<IncomingLen>>,
+    ) -> Result<(), Error> {
         let dma_pointer = if let Some(mut grant) = rx_buf.take() {
             let pointer = grant.dma_pointer() as u32;
             self.rx_grant = Some(grant);
             pointer
         } else {
-            self.rx_grant.as_mut().unwrap().dma_pointer() as u32
+            self.rx_grant
+                .as_mut()
+                .ok_or(Error::InternalError)?
+                .dma_pointer() as u32
         };
 
         // "No re-ordering of reads and writes across this point is allowed."
@@ -472,6 +481,7 @@ where
         self.radio
             .shorts
             .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().enabled());
+        Ok(())
     }
 
     // Must be called after `check_packet` returns `RxPayloadState::NoAck`.
