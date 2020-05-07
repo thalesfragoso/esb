@@ -208,6 +208,7 @@ where
                     }
                     self.attempts = 0;
                     self.send_packet()?;
+                    return Err(Error::MaximumAttempts);
                 }
             }
             State::TransmitterWaitRetransmit => {
@@ -287,8 +288,7 @@ where
     }
 
     fn send_packet(&mut self) -> Result<(), Error> {
-        if let Some(raw) = self.cons_from_app.read() {
-            let packet = PayloadR::new(raw);
+        if let Some(packet) = self.cons_from_app.read().map(PayloadR::new) {
             let ack = !packet.no_ack();
             self.radio.transmit(packet, ack);
             if ack {
@@ -301,7 +301,7 @@ where
         } else {
             self.radio.disable_disabled_interrupt();
             self.state = State::IdleTx;
-            Err(Error::OutgoingQueueFull)
+            Err(Error::OutgoingQueueEmpty)
         }
     }
 

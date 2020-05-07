@@ -1,8 +1,6 @@
 //! Rust implementation of Nordic's Enhanced ShockBurst
 
 #![no_std]
-// james sorry
-#![allow(dead_code)]
 
 pub mod peripherals;
 
@@ -49,6 +47,10 @@ pub enum Error {
 
     /// Unable to add item to the outgoing queue, queue is full
     OutgoingQueueFull,
+
+    /// Nothing to send. After issuing this error, [EsbIrq](struct.EsbIrq.html) will be put in the
+    /// Idle state
+    OutgoingQueueEmpty,
 
     /// Grant already in progress
     GrantInProgress,

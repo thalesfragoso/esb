@@ -400,8 +400,7 @@ where
                 // "No re-ordering of reads and writes across this point is allowed."
                 compiler_fence(Ordering::SeqCst);
 
-                if let Some(grant) = consumer.read() {
-                    let payload = PayloadR::new(grant);
+                if let Some(payload) = consumer.read().map(PayloadR::new) {
                     dma_pointer = payload.dma_pointer() as u32;
                     self.tx_grant = Some(payload);
                 }
