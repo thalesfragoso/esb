@@ -16,6 +16,7 @@ use core::sync::atomic::{compiler_fence, Ordering};
 use crate::{
     app::Addresses,
     payload::{PayloadR, PayloadW},
+    Error,
 };
 pub(crate) use pac::{Interrupt, NVIC, RADIO};
 
@@ -33,6 +34,7 @@ fn address_conversion(value: u32) -> u32 {
     value.reverse_bits()
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub(crate) enum RxPayloadState {
     Ack,
     NoAck,
@@ -52,6 +54,7 @@ where
     last_crc: [u16; NUM_PIPES],
     last_pid: [u8; NUM_PIPES],
     cached_pipe: u8,
+    max_payload: u8,
 }
 
 impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
@@ -67,11 +70,17 @@ where
             last_crc: [0; NUM_PIPES],
             last_pid: [0; NUM_PIPES],
             cached_pipe: 0,
+            max_payload: 0,
         }
     }
 
+    #[inline]
+    pub(crate) fn max_payload(&self) -> u8 {
+        self.max_payload
+    }
+
     pub(crate) fn init(&mut self, max_payload: u8, addresses: &Addresses) {
-        // Disables all interrupts
+        // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
         self.radio
             .intenclr
             .write(|w| unsafe { w.bits(0xFFFF_FFFF) });
@@ -94,8 +103,8 @@ where
                 .enabled()
         });
 
-        // Enable fast ramp-up if the hardware supports it
-        #[cfg(not(feature = "51"))]
+        // Enable fast ramp-up
+        #[cfg(feature = "fast-ru")]
         self.radio.modecnf0.modify(|_, w| w.ru().fast());
 
         // TODO: configurable tx_power
@@ -127,6 +136,8 @@ where
                 .crcpoly
                 .write(|w| w.crcpoly().bits(CRC_POLY & 0x00FF_FFFF));
 
+            self.radio.crccnf.write(|w| w.len().two());
+
             self.radio.base0.write(|w| w.bits(base0));
             self.radio.base1.write(|w| w.bits(base1));
 
@@ -139,6 +150,7 @@ where
                 .frequency
                 .write(|w| w.frequency().bits(addresses.rf_channel));
         }
+        self.max_payload = max_payload;
     }
 
     // Clears the Disabled event to not retrigger the interrupt
@@ -238,7 +250,7 @@ where
             self.clear_disabled_event();
             self.clear_ready_event();
             self.clear_end_event();
-            //self.radio.events_payload.write(|w| w.bits(0)); do we need this ? Probably not
+            self.radio.events_payload.write(|w| w.bits(0)); // do we need this ? Probably not
 
             // "Preceding reads and writes cannot be moved past subsequent writes."
             compiler_fence(Ordering::Release);
@@ -284,14 +296,16 @@ where
 
     // Returns true if the ack was received successfully
     // The upper stack is responsible for checking and disabling the timeouts
-    pub(crate) fn check_ack(&mut self) -> bool {
+    pub(crate) fn check_ack(&mut self) -> Result<bool, Error> {
         let ret = self.radio.crcstatus.read().crcstatus().is_crcok();
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
 
         if ret {
-            let (tx_grant, mut rx_grant) =
-                (self.tx_grant.take().unwrap(), self.rx_grant.take().unwrap());
+            let (tx_grant, mut rx_grant) = (
+                self.tx_grant.take().ok_or(Error::InternalError)?,
+                self.rx_grant.take().ok_or(Error::InternalError)?,
+            );
 
             let pipe = tx_grant.pipe();
             tx_grant.release();
@@ -306,7 +320,7 @@ where
             self.tx_grant.take();
             self.rx_grant.take();
         }
-        ret
+        Ok(ret)
     }
 
     // --------------- PRX methods --------------- //
@@ -343,7 +357,7 @@ where
     pub(crate) fn check_packet(
         &mut self,
         consumer: &mut FrameConsumer<'static, OutgoingLen>,
-    ) -> RxPayloadState {
+    ) -> Result<RxPayloadState, Error> {
         // If the user didn't provide a packet to send, we will fall back to this empty ack packet
         static FALLBACK_ACK: [u8; 2] = [0, 0];
 
@@ -357,15 +371,14 @@ where
 
             // NOTE(unsafe) 1 is a valid value to write to this register
             self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
-            // We can safely drop the payload, it will return to the queue
-            return RxPayloadState::BadCRC;
+            return Ok(RxPayloadState::BadCRC);
         }
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
 
         let pipe = self.radio.rxmatch.read().rxmatch().bits() as usize;
         let crc = self.radio.rxcrc.read().rxcrc().bits() as u16;
-        let rx_grant = self.rx_grant.as_ref().unwrap();
+        let rx_grant = self.rx_grant.as_ref().ok_or(Error::InternalError)?;
         let (pid, ack) = (rx_grant.pid(), !rx_grant.no_ack());
         let repeated = (self.last_crc[pipe] == crc) && (self.last_pid[pipe] == pid);
 
@@ -397,8 +410,7 @@ where
                 // "No re-ordering of reads and writes across this point is allowed."
                 compiler_fence(Ordering::SeqCst);
 
-                if let Some(grant) = consumer.read() {
-                    let payload = PayloadR::new(grant);
+                if let Some(payload) = consumer.read().map(PayloadR::new) {
                     dma_pointer = payload.dma_pointer() as u32;
                     self.tx_grant = Some(payload);
                 }
@@ -419,41 +431,48 @@ where
                 .shorts
                 .modify(|_, w| w.disabled_txen().disabled().disabled_rxen().enabled());
         } else {
+            // Stops the radio before transmission begins
             self.stop();
         }
 
         if repeated {
             if ack {
-                return RxPayloadState::RepeatedAck;
+                return Ok(RxPayloadState::RepeatedAck);
             } else {
-                return RxPayloadState::RepeatedNoAck;
+                return Ok(RxPayloadState::RepeatedNoAck);
             }
         }
         self.last_crc[pipe] = crc;
         self.last_pid[pipe] = pid;
         self.cached_pipe = pipe as u8;
 
-        let mut grant = self.rx_grant.take().unwrap();
+        let mut grant = self.rx_grant.take().ok_or(Error::InternalError)?;
         let rssi = self.radio.rssisample.read().rssisample().bits();
         grant.set_rssi(rssi);
         grant.set_pipe(pipe as u8);
         grant.commit_all();
         if ack {
-            RxPayloadState::Ack
+            Ok(RxPayloadState::Ack)
         } else {
-            RxPayloadState::NoAck
+            Ok(RxPayloadState::NoAck)
         }
     }
 
     // Must be called after the end of the ack transmission.
     // `rx_buf` must only be `None` if a previous call to `check_packet` returned `RepeatedAck`
-    pub(crate) fn complete_rx_ack(&mut self, mut rx_buf: Option<PayloadW<IncomingLen>>) {
+    pub(crate) fn complete_rx_ack(
+        &mut self,
+        mut rx_buf: Option<PayloadW<IncomingLen>>,
+    ) -> Result<(), Error> {
         let dma_pointer = if let Some(mut grant) = rx_buf.take() {
             let pointer = grant.dma_pointer() as u32;
             self.rx_grant = Some(grant);
             pointer
         } else {
-            self.rx_grant.as_mut().unwrap().dma_pointer() as u32
+            self.rx_grant
+                .as_mut()
+                .ok_or(Error::InternalError)?
+                .dma_pointer() as u32
         };
 
         // "No re-ordering of reads and writes across this point is allowed."
@@ -471,6 +490,7 @@ where
         self.radio
             .shorts
             .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().enabled());
+        Ok(())
     }
 
     // Must be called after `check_packet` returns `RxPayloadState::NoAck`.
@@ -534,6 +554,9 @@ macro_rules! impl_timer {
             impl EsbTimer for $ty {
                 #[inline]
                 fn init(&mut self) {
+                    // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
+                    self.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
+                    Self::stop();
                     self.bitmode.write(|w| w.bitmode()._32bit());
                     // 2^4 = 16
                     // 16 MHz / 16 = 1 MHz = µs resolution

@@ -1,10 +1,13 @@
-use crate::payload::{EsbHeader, PayloadR, PayloadW};
-use crate::peripherals::{Interrupt, NVIC};
-use crate::Error;
+use crate::{
+    payload::{EsbHeader, PayloadR, PayloadW},
+    peripherals::{Interrupt, NVIC},
+    Error,
+};
 use bbqueue::{
     framed::{FrameConsumer, FrameProducer},
     ArrayLength, Error as BbqError,
 };
+use core::default::Default;
 
 /// This is the primary Application-side interface.
 ///
@@ -130,5 +133,17 @@ impl Addresses {
             prefixes1,
             rf_channel,
         })
+    }
+}
+
+impl Default for Addresses {
+    fn default() -> Self {
+        Self {
+            base0: [0xE7, 0xE7, 0xE7, 0xE7],
+            base1: [0xC2, 0xC2, 0xC2, 0xC2],
+            prefixes0: [0xE7, 0xC2, 0xC3, 0xC4],
+            prefixes1: [0xC5, 0xC6, 0xC7, 0xC8],
+            rf_channel: 2,
+        }
     }
 }

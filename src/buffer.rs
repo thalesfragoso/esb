@@ -63,7 +63,8 @@ where
     /// This function will only succeed once. If the underlying buffers have also
     /// been split directly, this function will also fail.
     ///
-    /// Upon splitting, the Radio will be initialized and set to idle.
+    /// Upon splitting, the Radio will be initialized and set to
+    /// [IdleTx](enum.State.html#variant.IdleTx).
     #[allow(clippy::type_complexity)]
     pub fn try_split<T: EsbTimer>(
         &'static self,

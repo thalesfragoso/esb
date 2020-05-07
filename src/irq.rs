@@ -1,7 +1,7 @@
 use crate::{
     app::Addresses,
-    payload::{PayloadR, PayloadW},
-    peripherals::{EsbRadio, EsbTimer},
+    payload::{EsbHeader, PayloadR, PayloadW},
+    peripherals::{EsbRadio, EsbTimer, Interrupt, RxPayloadState, NVIC},
     Config, Error, RAMP_UP_TIME,
 };
 use bbqueue::{
@@ -13,10 +13,8 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-const MAX_PACKET_SIZE: usize = 256;
-
 /// The current state of the radio
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum State {
     /// The radio is idle in PTX mode
     IdleTx,
@@ -35,6 +33,10 @@ pub enum State {
     TransmitterWaitRetransmit,
     /// ESB in the PRX state listening for packets
     Receiver,
+    /// Transmitting the acknowledgement
+    TransmittingAck,
+    /// Transmitting the acknowledgement for a repeated packet
+    TransmittingRepeatedAck,
 }
 
 pub struct IrqTimer<T: EsbTimer> {
@@ -44,7 +46,22 @@ pub struct IrqTimer<T: EsbTimer> {
 }
 
 impl<T: EsbTimer> IrqTimer<T> {
-    // TODO
+    /// Must be called inside the timer interrupt handler.
+    pub fn timer_interrupt(&mut self) {
+        // Check which event triggered the timer
+        let retransmit_event = T::is_retransmit_pending();
+        let ack_timeout_event = T::is_ack_pending();
+
+        if retransmit_event {
+            T::clear_interrupt_retransmit();
+        }
+        // Retransmit might have been triggered just after ack, check and clear ack too
+        if ack_timeout_event {
+            T::clear_interrupt_ack();
+        }
+        self.timer_flag.store(true, Ordering::Release);
+        NVIC::pend(Interrupt::RADIO);
+    }
 }
 
 /// This is the primary RADIO-interrupt-side interface.
@@ -93,6 +110,7 @@ where
     Timer: EsbTimer,
 {
     /// Must be called inside the radio interrupt handler.
+    #[allow(clippy::cognitive_complexity)]
     pub fn radio_interrupt(&mut self) -> Result<State, Error> {
         let disabled_event = self.radio.check_disabled_event();
         let ready_event = self.radio.check_ready_event();
@@ -102,20 +120,22 @@ where
         // user did.
         let user_event = !disabled_event && !ready_event && !timer_event;
 
-        // Clear flags
-        self.radio.clear_disabled_event();
-        self.radio.clear_ready_event();
-        self.timer_flag.store(false, Ordering::Release);
+        self.clear_flags();
 
-        if user_event && (self.state != State::IdleTx || self.state != State::IdleRx) {
+        if user_event && !(self.state == State::IdleTx || self.state == State::IdleRx) {
             return Ok(self.state);
         }
 
         match self.state {
             State::IdleTx => {
                 // Interrupt received means that the user pushed a packet to the queue.
-                debug_assert!(user_event);
-                self.send_packet();
+
+                // TODO: Sometimes we get a wrong timer interrupt here, found out what is the
+                // problem
+                //debug_assert!(user_event);
+                if user_event {
+                    self.send_packet();
+                }
             }
             State::TransmitterTxNoAck => {
                 // Transmission ended
@@ -136,7 +156,7 @@ where
 
                 let packet = self
                     .prod_to_app
-                    .grant(MAX_PACKET_SIZE)
+                    .grant(self.radio.max_payload() as usize + EsbHeader::header_size())
                     .map(PayloadW::new_from_radio);
                 if let Ok(packet) = packet {
                     self.radio.prepare_for_ack(packet);
@@ -161,7 +181,7 @@ where
                 if disabled_event {
                     // We got an ack, check it
                     Timer::clear_interrupt_ack();
-                    if self.radio.check_ack() {
+                    if self.radio.check_ack()? {
                         // Everything went fine, `clear_interrupt_retransmit` also resets and stops
                         // the timer
                         Timer::clear_interrupt_retransmit();
@@ -191,6 +211,7 @@ where
                     }
                     self.attempts = 0;
                     self.send_packet();
+                    return Err(Error::MaximumAttempts);
                 }
             }
             State::TransmitterWaitRetransmit => {
@@ -198,14 +219,81 @@ where
                 // The timer interrupt cleared and stopped the timer by now
                 self.send_packet();
             }
-            _ => todo!(),
+            State::Receiver => {
+                debug_assert!(disabled_event);
+                // We got a packet, check it
+                match self.radio.check_packet(&mut self.cons_from_app)? {
+                    // Do nothing, the radio will return to rx
+                    RxPayloadState::BadCRC => {}
+                    RxPayloadState::NoAck => {
+                        self.prepare_receiver(|this, grant| {
+                            this.radio.complete_rx_no_ack(Some(grant));
+                            Ok(())
+                        })?;
+                    }
+                    RxPayloadState::RepeatedNoAck => {
+                        // this goes back to rx
+                        self.radio.complete_rx_no_ack(None);
+                    }
+                    RxPayloadState::Ack => {
+                        self.state = State::TransmittingAck;
+                    }
+                    RxPayloadState::RepeatedAck => {
+                        self.state = State::TransmittingRepeatedAck;
+                    }
+                }
+            }
+            State::TransmittingAck => {
+                debug_assert!(disabled_event);
+                // We finished transmitting the acknowledgement, get ready for the next packet
+                self.prepare_receiver(|this, grant| {
+                    // This goes back to rx
+                    this.radio.complete_rx_ack(Some(grant))?;
+                    this.state = State::Receiver;
+                    Ok(())
+                })?;
+            }
+            State::TransmittingRepeatedAck => {
+                debug_assert!(disabled_event);
+                // This goes back to rx
+                self.radio.complete_rx_ack(None)?;
+                self.state = State::Receiver;
+            }
+            State::IdleRx => {
+                debug_assert!(user_event);
+                self.start_receiving()?;
+            }
         }
         Ok(self.state)
     }
 
+    /// Changes the stack to the receiving state
+    pub fn start_receiving(&mut self) -> Result<(), Error> {
+        if self.state != State::IdleTx || self.state != State::IdleRx {
+            // Put the radio in a known state
+            self.radio.stop();
+            Timer::clear_interrupt_retransmit();
+            Timer::clear_interrupt_ack();
+            self.clear_flags();
+        }
+        self.prepare_receiver(|this, grant| {
+            this.radio.start_receiving(grant, this.config.enabled_pipes);
+            this.state = State::Receiver;
+            Ok(())
+        })
+    }
+
+    #[inline]
+    fn clear_flags(&mut self) {
+        self.radio.clear_disabled_event();
+        self.radio.clear_ready_event();
+        self.timer_flag.store(false, Ordering::Release);
+        // TODO: Try to remove this, probably not necessary
+        NVIC::unpend(Interrupt::RADIO);
+    }
+
     fn send_packet(&mut self) {
-        if let Some(raw) = self.cons_from_app.read() {
-            let packet = PayloadR::new(raw);
+        if let Some(packet) = self.cons_from_app.read().map(PayloadR::new) {
             let ack = !packet.no_ack();
             self.radio.transmit(packet, ack);
             if ack {
@@ -216,6 +304,24 @@ where
         } else {
             self.radio.disable_disabled_interrupt();
             self.state = State::IdleTx;
+        }
+    }
+
+    fn prepare_receiver<F>(&mut self, f: F) -> Result<(), Error>
+    where
+        F: FnOnce(&mut Self, PayloadW<IncomingLen>) -> Result<(), Error>,
+    {
+        if let Ok(grant) = self
+            .prod_to_app
+            .grant(self.radio.max_payload() as usize + EsbHeader::header_size())
+            .map(PayloadW::new_from_radio)
+        {
+            f(self, grant)?;
+            Ok(())
+        } else {
+            self.radio.stop();
+            self.state = State::IdleRx;
+            Err(Error::IncomingQueueFull)
         }
     }
 }
