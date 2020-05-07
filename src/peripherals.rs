@@ -33,6 +33,7 @@ fn address_conversion(value: u32) -> u32 {
     value.reverse_bits()
 }
 
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub(crate) enum RxPayloadState {
     Ack,
     NoAck,
@@ -71,7 +72,7 @@ where
     }
 
     pub(crate) fn init(&mut self, max_payload: u8, addresses: &Addresses) {
-        // Disables all interrupts
+        // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
         self.radio
             .intenclr
             .write(|w| unsafe { w.bits(0xFFFF_FFFF) });
@@ -357,7 +358,6 @@ where
 
             // NOTE(unsafe) 1 is a valid value to write to this register
             self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
-            // We can safely drop the payload, it will return to the queue
             return RxPayloadState::BadCRC;
         }
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
@@ -419,6 +419,7 @@ where
                 .shorts
                 .modify(|_, w| w.disabled_txen().disabled().disabled_rxen().enabled());
         } else {
+            // Stops the radio before transmission begins
             self.stop();
         }
 
@@ -534,6 +535,9 @@ macro_rules! impl_timer {
             impl EsbTimer for $ty {
                 #[inline]
                 fn init(&mut self) {
+                    // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
+                    self.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
+                    Self::stop();
                     self.bitmode.write(|w| w.bitmode()._32bit());
                     // 2^4 = 16
                     // 16 MHz / 16 = 1 MHz = µs resolution
