@@ -135,7 +135,7 @@ impl EsbHeaderBuilder {
 /// assert_eq!(builder_result, new_result);
 /// ```
 ///
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct EsbHeader {
     rssi: u8,
     // TODO(AJM): We can probably combine the 3 bits of pipe
@@ -198,18 +198,23 @@ impl EsbHeader {
     }
 
     /// Accessor for the Pipe ID of the packet
-    pub fn pid(&self) -> u8 {
+    pub fn pid(self) -> u8 {
         self.pid_no_ack >> 1
     }
 
     /// Accessor for the no-ack field of the packet
-    pub fn no_ack(&self) -> bool {
+    pub fn no_ack(self) -> bool {
         self.pid_no_ack & 1 != 1
     }
 
     /// Accessor for the length (in bytes) of the payload
-    pub fn payload_len(&self) -> usize {
+    pub fn payload_len(self) -> usize {
         usize::from(self.length)
+    }
+
+    /// Accessor for the rssi of the payload
+    pub fn rssi(self) -> u8 {
+        self.rssi
     }
 
     /// Byte index of the RSSI field

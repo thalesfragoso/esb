@@ -54,6 +54,7 @@ where
     last_crc: [u16; NUM_PIPES],
     last_pid: [u8; NUM_PIPES],
     cached_pipe: u8,
+    max_payload: u8,
 }
 
 impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
@@ -69,7 +70,13 @@ where
             last_crc: [0; NUM_PIPES],
             last_pid: [0; NUM_PIPES],
             cached_pipe: 0,
+            max_payload: 0,
         }
+    }
+
+    #[inline]
+    pub(crate) fn max_payload(&self) -> u8 {
+        self.max_payload
     }
 
     pub(crate) fn init(&mut self, max_payload: u8, addresses: &Addresses) {
@@ -141,6 +148,7 @@ where
                 .frequency
                 .write(|w| w.frequency().bits(addresses.rf_channel));
         }
+        self.max_payload = max_payload;
     }
 
     // Clears the Disabled event to not retrigger the interrupt

@@ -1,6 +1,6 @@
 use crate::{
     app::Addresses,
-    payload::{PayloadR, PayloadW},
+    payload::{EsbHeader, PayloadR, PayloadW},
     peripherals::{EsbRadio, EsbTimer, Interrupt, RxPayloadState, NVIC},
     Config, Error, RAMP_UP_TIME,
 };
@@ -13,10 +13,8 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-const MAX_PACKET_SIZE: usize = 256;
-
 /// The current state of the radio
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum State {
     /// The radio is idle in PTX mode
     IdleTx,
@@ -124,7 +122,7 @@ where
 
         self.clear_flags();
 
-        if user_event && (self.state != State::IdleTx || self.state != State::IdleRx) {
+        if user_event && !(self.state == State::IdleTx || self.state == State::IdleRx) {
             return Ok(self.state);
         }
 
@@ -132,12 +130,12 @@ where
             State::IdleTx => {
                 // Interrupt received means that the user pushed a packet to the queue.
                 debug_assert!(user_event);
-                self.send_packet()?;
+                self.send_packet();
             }
             State::TransmitterTxNoAck => {
                 // Transmission ended
                 self.radio.finish_tx_no_ack();
-                self.send_packet()?;
+                self.send_packet();
             }
             State::RampUpTx => {
                 debug_assert!(ready_event);
@@ -153,7 +151,7 @@ where
 
                 let packet = self
                     .prod_to_app
-                    .grant(MAX_PACKET_SIZE)
+                    .grant(self.radio.max_payload() as usize + EsbHeader::header_size())
                     .map(PayloadW::new_from_radio);
                 if let Ok(packet) = packet {
                     self.radio.prepare_for_ack(packet);
@@ -183,7 +181,7 @@ where
                         // the timer
                         Timer::clear_interrupt_retransmit();
                         self.attempts = 0;
-                        self.send_packet()?;
+                        self.send_packet();
                     } else {
                         // CRC mismatch, wait for retransmission
                         retransmit = true;
@@ -207,14 +205,14 @@ where
                         old_packet.release();
                     }
                     self.attempts = 0;
-                    self.send_packet()?;
+                    self.send_packet();
                     return Err(Error::MaximumAttempts);
                 }
             }
             State::TransmitterWaitRetransmit => {
                 debug_assert!(timer_event);
                 // The timer interrupt cleared and stopped the timer by now
-                self.send_packet()?;
+                self.send_packet();
             }
             State::Receiver => {
                 debug_assert!(disabled_event);
@@ -287,21 +285,18 @@ where
         self.timer_flag.store(false, Ordering::Release);
     }
 
-    fn send_packet(&mut self) -> Result<(), Error> {
+    fn send_packet(&mut self) {
         if let Some(packet) = self.cons_from_app.read().map(PayloadR::new) {
             let ack = !packet.no_ack();
             self.radio.transmit(packet, ack);
             if ack {
                 self.state = State::RampUpTx;
-                Ok(())
             } else {
                 self.state = State::TransmitterTxNoAck;
-                Ok(())
             }
         } else {
             self.radio.disable_disabled_interrupt();
             self.state = State::IdleTx;
-            Err(Error::OutgoingQueueEmpty)
         }
     }
 
@@ -311,7 +306,7 @@ where
     {
         if let Ok(grant) = self
             .prod_to_app
-            .grant(MAX_PACKET_SIZE)
+            .grant(self.radio.max_payload() as usize + EsbHeader::header_size())
             .map(PayloadW::new_from_radio)
         {
             f(self, grant)?;

@@ -4,16 +4,16 @@
 
 pub mod peripherals;
 
-pub(crate) mod app;
-pub(crate) mod buffer;
-pub(crate) mod irq;
-pub(crate) mod payload;
+pub mod app;
+pub mod buffer;
+pub mod irq;
+pub mod payload;
 
 // Export crate relevant items
 pub use crate::{
-    app::EsbApp,
+    app::{Addresses, EsbApp},
     buffer::EsbBuffer,
-    irq::{EsbIrq, State},
+    irq::{EsbIrq, IrqTimer, State},
     payload::{EsbHeader, EsbHeaderBuilder},
 };
 
@@ -47,10 +47,6 @@ pub enum Error {
 
     /// Unable to add item to the outgoing queue, queue is full
     OutgoingQueueFull,
-
-    /// Nothing to send. After issuing this error, [EsbIrq](struct.EsbIrq.html) will be put in the
-    /// Idle state
-    OutgoingQueueEmpty,
 
     /// Grant already in progress
     GrantInProgress,
