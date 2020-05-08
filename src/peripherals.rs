@@ -103,8 +103,8 @@ where
                 .enabled()
         });
 
-        // Enable fast ramp-up if the hardware supports it
-        #[cfg(not(feature = "51"))]
+        // Enable fast ramp-up
+        #[cfg(feature = "fast-ru")]
         self.radio.modecnf0.modify(|_, w| w.ru().fast());
 
         // TODO: configurable tx_power
@@ -135,6 +135,8 @@ where
             self.radio
                 .crcpoly
                 .write(|w| w.crcpoly().bits(CRC_POLY & 0x00FF_FFFF));
+
+            self.radio.crccnf.write(|w| w.len().two());
 
             self.radio.base0.write(|w| w.bits(base0));
             self.radio.base1.write(|w| w.bits(base1));
@@ -248,7 +250,7 @@ where
             self.clear_disabled_event();
             self.clear_ready_event();
             self.clear_end_event();
-            //self.radio.events_payload.write(|w| w.bits(0)); do we need this ? Probably not
+            self.radio.events_payload.write(|w| w.bits(0)); // do we need this ? Probably not
 
             // "Preceding reads and writes cannot be moved past subsequent writes."
             compiler_fence(Ordering::Release);

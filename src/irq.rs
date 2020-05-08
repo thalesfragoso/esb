@@ -129,8 +129,13 @@ where
         match self.state {
             State::IdleTx => {
                 // Interrupt received means that the user pushed a packet to the queue.
-                debug_assert!(user_event);
-                self.send_packet();
+
+                // TODO: Sometimes we get a wrong timer interrupt here, found out what is the
+                // problem
+                //debug_assert!(user_event);
+                if user_event {
+                    self.send_packet();
+                }
             }
             State::TransmitterTxNoAck => {
                 // Transmission ended
@@ -283,6 +288,8 @@ where
         self.radio.clear_disabled_event();
         self.radio.clear_ready_event();
         self.timer_flag.store(false, Ordering::Release);
+        // TODO: Try to remove this, probably not necessary
+        NVIC::unpend(Interrupt::RADIO);
     }
 
     fn send_packet(&mut self) {

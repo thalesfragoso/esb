@@ -21,18 +21,19 @@ use core::default::Default;
 // Export dependency items necessary to create a backing structure
 pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
 
-const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 48;
+// TODO: Figure it out good values
+const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 120;
 const RETRANSMIT_DELAY_US_OFFSET: u16 = 62;
-const RETRANSMIT_DELAY: u16 = 250;
+const RETRANSMIT_DELAY: u16 = 500;
 const MAXIMUM_TRANSMIT_ATTEMPTS: u8 = 3;
 const ENABLED_PIPES: u8 = 0xFF;
 
 // TODO: Document Ramp-up time
-#[cfg(feature = "51")]
+#[cfg(not(feature = "fast-ru"))]
 pub(crate) const RAMP_UP_TIME: u16 = 140;
 
 // This is only true if we enable the fast ramp-up time, which we do
-#[cfg(not(feature = "51"))]
+#[cfg(feature = "fast-ru")]
 pub(crate) const RAMP_UP_TIME: u16 = 40;
 
 /// Crate-wide error type
@@ -121,8 +122,8 @@ impl Default for Config {
 ///
 /// | Field                               | Default Value |
 /// | :---                                | :---          |
-/// | Ack Timeout                         | 48 us         |
-/// | Retransmit Delay                    | 250 us        |
+/// | Ack Timeout                         | 120 us        |
+/// | Retransmit Delay                    | 500 us        |
 /// | Maximum number of transmit attempts | 3             |
 /// | Enabled Pipes                       | 0xFF          |
 ///
@@ -143,7 +144,7 @@ impl ConfigBuilder {
 
     // TODO: document 62
     /// Sets `retransmit_delay` field, must be bigger than `wait_for_ack_timeout` field plus 62 and
-    /// bigger than the ramp-up time (130us for nRF51 and 40us for nRF52)
+    /// bigger than the ramp-up time (140us without fast-ru and 40us with fast-ru)
     pub fn retransmit_delay(mut self, micros: u16) -> Self {
         self.0.retransmit_delay = micros;
         self

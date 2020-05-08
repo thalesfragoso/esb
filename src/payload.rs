@@ -96,7 +96,7 @@ impl EsbHeaderBuilder {
         let bad_length = self.0.length > 252;
         let bad_pipe = self.0.pipe > 7;
 
-        // This checks if "pid" >= 3, where pid_no_ack is pid << 1.
+        // This checks if "pid" > 3, where pid_no_ack is pid << 1.
         let bad_pid = self.0.pid_no_ack > 0b0000_0111;
 
         if bad_length || bad_pid || bad_pipe {
@@ -297,6 +297,11 @@ where
     /// An accessor function for the no-ack field of the current grant
     pub fn no_ack(&self) -> bool {
         self.grant[EsbHeader::pid_no_ack_idx()] & 1 != 1
+    }
+
+    /// An accessor function to get the size of the payload of the current grant
+    pub fn payload_len(&self) -> usize {
+        self.grant[EsbHeader::length_idx()] as usize
     }
 
     /// This function marks the packet as read, and restores the space
