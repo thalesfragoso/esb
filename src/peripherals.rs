@@ -196,7 +196,7 @@ where
     }
 
     // Disables the radio and the `radio disabled` interrupt
-    pub(crate) fn stop(&mut self) {
+    pub(crate) fn stop(&mut self, drop_grants: bool) {
         self.radio
             .shorts
             .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().disabled());
@@ -211,9 +211,11 @@ where
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
 
-        // Drop grants we might have
-        self.tx_grant.take();
-        self.rx_grant.take();
+        if drop_grants {
+            // Drop grants we might have
+            self.tx_grant.take();
+            self.rx_grant.take();
+        }
     }
 
     // --------------- PTX methods --------------- //
@@ -296,6 +298,7 @@ where
 
     // Returns true if the ack was received successfully
     // The upper stack is responsible for checking and disabling the timeouts
+    #[inline]
     pub(crate) fn check_ack(&mut self) -> Result<bool, Error> {
         let ret = self.radio.crcstatus.read().crcstatus().is_crcok();
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
@@ -354,6 +357,7 @@ where
     }
 
     // Check the received packet.
+    #[inline]
     pub(crate) fn check_packet(
         &mut self,
         consumer: &mut FrameConsumer<'static, OutgoingLen>,
@@ -363,7 +367,7 @@ where
 
         if self.radio.crcstatus.read().crcstatus().is_crcerror() {
             // Bad CRC, clear events and restart RX.
-            self.stop();
+            self.stop(false);
             self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
             self.radio.intenset.write(|w| w.disabled().set_bit());
             // "Preceding reads and writes cannot be moved past subsequent writes."
@@ -375,6 +379,7 @@ where
         }
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
+        self.clear_ready_event();
 
         let pipe = self.radio.rxmatch.read().rxmatch().bits() as usize;
         let crc = self.radio.rxcrc.read().rxcrc().bits() as u16;
@@ -424,6 +429,9 @@ where
                 .packetptr
                 .write(|w| unsafe { w.bits(dma_pointer) });
 
+            // Check if the ramp-up was faster than us :/
+            debug_assert!(!self.check_ready_event());
+
             // Disables the shortcut for `txen`, we already hit that.
             // Enables the shortcut for `rxen` to turn around to rx after the end of the ack
             // transmission.
@@ -432,7 +440,7 @@ where
                 .modify(|_, w| w.disabled_txen().disabled().disabled_rxen().enabled());
         } else {
             // Stops the radio before transmission begins
-            self.stop();
+            self.stop(false);
         }
 
         if repeated {
