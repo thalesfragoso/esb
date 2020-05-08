@@ -162,7 +162,7 @@ where
                     self.radio.prepare_for_ack(packet);
                     self.state = State::RampUpRx;
                 } else {
-                    self.radio.stop();
+                    self.radio.stop(true);
                     Timer::clear_interrupt_retransmit();
                     self.state = State::IdleTx;
                     return Err(Error::IncomingQueueFull);
@@ -197,7 +197,7 @@ where
                     retransmit = true;
                 }
                 if retransmit {
-                    self.radio.stop();
+                    self.radio.stop(true);
                     self.attempts += 1;
                     self.state = State::TransmitterWaitRetransmit;
                 }
@@ -271,7 +271,7 @@ where
     pub fn start_receiving(&mut self) -> Result<(), Error> {
         if self.state != State::IdleTx || self.state != State::IdleRx {
             // Put the radio in a known state
-            self.radio.stop();
+            self.radio.stop(true);
             Timer::clear_interrupt_retransmit();
             Timer::clear_interrupt_ack();
             self.clear_flags();
@@ -319,7 +319,7 @@ where
             f(self, grant)?;
             Ok(())
         } else {
-            self.radio.stop();
+            self.radio.stop(true);
             self.state = State::IdleRx;
             Err(Error::IncomingQueueFull)
         }
