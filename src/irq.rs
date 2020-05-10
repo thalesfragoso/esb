@@ -103,6 +103,12 @@ where
     pub(crate) config: Config,
 }
 
+struct Events {
+    disabled: bool,
+    ready: bool,
+    timer: bool,
+}
+
 impl<OutgoingLen, IncomingLen, Timer> EsbIrq<OutgoingLen, IncomingLen, Timer>
 where
     OutgoingLen: ArrayLength<u8>,
@@ -112,15 +118,11 @@ where
     /// Must be called inside the radio interrupt handler.
     #[allow(clippy::cognitive_complexity)]
     pub fn radio_interrupt(&mut self) -> Result<State, Error> {
-        let disabled_event = self.radio.check_disabled_event();
-        let ready_event = self.radio.check_ready_event();
-        let timer_event = self.timer_flag.load(Ordering::Acquire);
+        let Events { disabled, ready, timer } = self.check_and_clear_flags();
 
         // We only trigger the interrupt in these three events, if we didn't trigger it then the
         // user did.
-        let user_event = !disabled_event && !ready_event && !timer_event;
-
-        self.clear_flags();
+        let user_event = !disabled && !ready && !timer;
 
         if user_event && !(self.state == State::IdleTx || self.state == State::IdleRx) {
             return Ok(self.state);
@@ -143,7 +145,7 @@ where
                 self.send_packet();
             }
             State::RampUpTx => {
-                debug_assert!(ready_event);
+                debug_assert!(ready, "RampUpTx de: {}, re: {}, te: {}", disabled, ready, timer);
 
                 // The radio will be disabled if we retransmit, because of that we need to take into
                 // account the ramp-up time for TX
@@ -152,7 +154,7 @@ where
                 self.state = State::TransmitterTx;
             }
             State::TransmitterTx => {
-                debug_assert!(disabled_event);
+                debug_assert!(disabled, "TransmitterTx de: {}, re: {}, te: {}", disabled, ready, timer);
 
                 let packet = self
                     .prod_to_app
@@ -169,7 +171,7 @@ where
                 }
             }
             State::RampUpRx => {
-                debug_assert!(ready_event);
+                debug_assert!(ready, "RampUpRx de: {}, re: {}, te: {}", disabled, ready, timer);
 
                 self.radio.disable_ready_interrupt();
                 self.timer
@@ -178,7 +180,7 @@ where
             }
             State::TransmitterWaitAck => {
                 let mut retransmit = false;
-                if disabled_event {
+                if disabled {
                     // We got an ack, check it
                     Timer::clear_interrupt_ack();
                     if self.radio.check_ack()? {
@@ -192,7 +194,7 @@ where
                         retransmit = true;
                     }
                 } else {
-                    debug_assert!(timer_event);
+                    debug_assert!(timer, "TransmitterWaitAck de: {}, re: {}, te: {}", disabled, ready, timer);
                     // Ack timeout
                     retransmit = true;
                 }
@@ -215,12 +217,12 @@ where
                 }
             }
             State::TransmitterWaitRetransmit => {
-                debug_assert!(timer_event);
+                debug_assert!(timer, "TransmitterWaitRetransmit de: {}, re: {}, te: {}", disabled, ready, timer);
                 // The timer interrupt cleared and stopped the timer by now
                 self.send_packet();
             }
             State::Receiver => {
-                debug_assert!(disabled_event);
+                debug_assert!(disabled, "Receiver de: {}, re: {}, te: {}", disabled, ready, timer);
                 // We got a packet, check it
                 match self.radio.check_packet(&mut self.cons_from_app)? {
                     // Do nothing, the radio will return to rx
@@ -244,7 +246,7 @@ where
                 }
             }
             State::TransmittingAck => {
-                debug_assert!(disabled_event);
+                debug_assert!(disabled, "TransmittingAck de: {}, re: {}, te: {}", disabled, ready, timer);
                 // We finished transmitting the acknowledgement, get ready for the next packet
                 self.prepare_receiver(|this, grant| {
                     // This goes back to rx
@@ -254,13 +256,13 @@ where
                 })?;
             }
             State::TransmittingRepeatedAck => {
-                debug_assert!(disabled_event);
+                debug_assert!(disabled, "TransmittingRepeatedAck de: {}, re: {}, te: {}", disabled, ready, timer);
                 // This goes back to rx
                 self.radio.complete_rx_ack(None)?;
                 self.state = State::Receiver;
             }
             State::IdleRx => {
-                debug_assert!(user_event);
+                debug_assert!(user_event, "TransmittingRepeatedAck de: {}, re: {}, te: {}", disabled, ready, timer);
                 self.start_receiving()?;
             }
         }
@@ -274,7 +276,7 @@ where
             self.radio.stop(true);
             Timer::clear_interrupt_retransmit();
             Timer::clear_interrupt_ack();
-            self.clear_flags();
+            let _= self.check_and_clear_flags();
         }
         self.prepare_receiver(|this, grant| {
             this.radio.start_receiving(grant, this.config.enabled_pipes);
@@ -284,12 +286,27 @@ where
     }
 
     #[inline]
-    fn clear_flags(&mut self) {
-        self.radio.clear_disabled_event();
-        self.radio.clear_ready_event();
-        self.timer_flag.store(false, Ordering::Release);
+    fn check_and_clear_flags(&mut self) -> Events {
+        let evts = Events {
+            disabled: self.radio.check_disabled_event(),
+            ready: self.radio.check_ready_event(),
+            timer: self.timer_flag.load(Ordering::Acquire),
+        };
+
+        if evts.disabled {
+            self.radio.clear_disabled_event();
+        }
+        if evts.ready {
+            self.radio.clear_ready_event();
+        }
+        if evts.timer {
+            self.timer_flag.store(false, Ordering::Release);
+        }
+
         // TODO: Try to remove this, probably not necessary
         NVIC::unpend(Interrupt::RADIO);
+
+        evts
     }
 
     fn send_packet(&mut self) {
