@@ -183,12 +183,6 @@ where
         self.radio.events_ready.reset();
     }
 
-    // Disables Ready interrupt
-    #[inline]
-    pub(crate) fn disable_ready_interrupt(&mut self) {
-        self.radio.intenclr.write(|w| w.ready().set_bit());
-    }
-
     // Disables Disabled interrupt
     #[inline]
     pub(crate) fn disable_disabled_interrupt(&mut self) {
@@ -221,20 +215,12 @@ where
     // --------------- PTX methods --------------- //
 
     // Transmit a packet and setup interrupts.
-    // If the an ack is requested, the `ready` interrupt will be enabled and the upper stack must
-    // check for this condition and perfom the necessary actions.
     pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
             self.radio.shorts.modify(|_, w| w.disabled_rxen().enabled());
-            // Enable `disabled` interrupt to know when the radio finished transmission and `ready`
-            // to know when it started listening for the ack
-            self.radio
-                .intenset
-                .write(|w| w.disabled().set_bit().ready().set_bit());
-        } else {
-            self.radio.intenset.write(|w| w.disabled().set_bit());
         }
+        self.radio.intenset.write(|w| w.disabled().set_bit());
         unsafe {
             // NOTE(unsafe) Pipe fits in 3 bits
             self.radio
@@ -280,6 +266,7 @@ where
     // Must be called after the end of TX if the user requested for an ack.
     // Timers must be set accordingly by the upper stack
     pub(crate) fn prepare_for_ack(&mut self, mut rx_buf: PayloadW<IncomingLen>) {
+        self.clear_ready_event();
         // We need a compiler fence here because the DMA will automatically start listening for
         // packets after the ramp-up is completed
         // "Preceding reads and writes cannot be moved past subsequent writes."
@@ -287,6 +274,10 @@ where
         self.radio
             .packetptr
             .write(|w| unsafe { w.bits(rx_buf.dma_pointer() as u32) });
+
+        // Check if the radio turn around was faster than us
+        debug_assert!(!self.check_ready_event(), "Missed window (PTX)");
+
         self.rx_grant = Some(rx_buf);
         // this already fired
         self.radio
@@ -346,7 +337,7 @@ where
             self.clear_disabled_event();
             self.clear_ready_event();
             self.clear_end_event();
-            //self.radio.events_payload.write(|w| w.bits(0)); do we need this ? Probably not
+            self.radio.events_payload.write(|w| w.bits(0)); // TODO: do we need this ? Probably not
 
             // "Preceding reads and writes cannot be moved past subsequent writes."
             compiler_fence(Ordering::Release);
@@ -430,7 +421,7 @@ where
                 .write(|w| unsafe { w.bits(dma_pointer) });
 
             // Check if the ramp-up was faster than us :/
-            debug_assert!(!self.check_ready_event());
+            debug_assert!(!self.check_ready_event(), "Missed window (PRX)");
 
             // Disables the shortcut for `txen`, we already hit that.
             // Enables the shortcut for `rxen` to turn around to rx after the end of the ack

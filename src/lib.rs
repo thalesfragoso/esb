@@ -1,4 +1,69 @@
-//! Rust implementation of Nordic's Enhanced ShockBurst
+//! Rust implementation of Nordic's Enhanced ShockBurst communication protocol
+//!
+//! State: **beta**
+//!
+//! This crate implements the Enhanced ShockBurst protocol with dynamic payload size up to 252 bytes
+//! and acknowledgement support.
+//!
+//! The communication is performed by two devices in different roles, one acting as the
+//! Primary Transmitter (PTX) and a second one acting as the Primary Receiver (PRX). The
+//! transaction is always started by the PTX, and bi-directional communication is achieved via
+//! acknowledgement packets, where the PRX can embed a payload.
+//!
+//! This crate makes use of [`bbqueue`](https://docs.rs/bbqueue) to handle buffering of packets and
+//! to be able to achieve a zero-copy implementation. For timing requirements, the payload that must
+//! be sent together with an acknowledgement must be pre-buffered. When a packet that demands an
+//! acknowledgement is received in PRX mode the driver will try to dequeue a payload from the
+//! transmit queue to be sent, an acknowledgement with a zero sized payload will be sent if the
+//! transmit queue is empty.
+//!
+//! # Timing Requirements
+//!
+//! For better communication stability, both the radio and timer interrupts must be top priority,
+//! and the driver's methods should be called at the beginning of the interrupt handler. In
+//! the current implementation, the data rate is fixed at 2Mbps.
+//!
+//! There are three configurable options that directly affect the timing of the communication:
+//!
+//! - Wait for acknowledgement timeout (us) - Default: 120 microseconds.
+//!     - It is used in PTX mode while sending a packet that requested for an acknowledgement. It
+//!       must be bigger than the [Ramp-up](#ramp-up) time.
+//!
+//! - Retransmit delay offset (us) - Default: 500 microseconds.
+//!     - The delay between the end of a transmission and the start of a retransmission when an
+//!       acknowledgement was expected but not received. It must be bigger than the
+//!       `acknowledgement timeout` plus a constant offset of 62 microseconds.
+//!
+//! - Number of retransmit attempts - Default: 3 attempts.
+//!     - The number of times the driver will retransmit a packet that requires an acknowledgement.
+//!       After all the attempts are carried out, the driver will drop the packet and proceed to
+//!       transmit the next one in the queue.
+//!
+//! # Supported devices and crate features
+//!
+//! | Device   | Feature |
+//! | :---     | :---    |
+//! | nRF51822 | 51      |
+//! | nRF52810 | 52810   |
+//! | nRF52832 | 52832   |
+//! | nRF52840 | 52840   |
+//!
+//! Other devices might be compatible with this implementation, however, at this point, the only
+//! tested devices are the ones in the table above.
+//!
+//! # Ramp-up
+//!
+//! The radio's hardware requires a time before the start or reception of a transmission. This time
+//! is 140 microseconds in the nRF5 devices. However, nRF52 devices have a Fast Ramp-up feature,
+//! where this time is reduced to 40 microseconds. This feature can be enabled by using the
+//! `fast-ru` feature of this crate. Care must be taken when using the Fast Ramp-up while
+//! communicating with devices that do not support it, the timing configuration must take this case
+//! into account.
+//!
+//! # Examples
+//!
+//! Usage examples can be found at the [demos repo](https://github.com/thalesfragoso/esb-demos).
+//!
 
 #![no_std]
 
@@ -43,7 +108,7 @@ pub enum Error {
     // EOF,
     // InProgress,
     /// Unable to add item to the incoming queue, queue is full. After issuing this error,
-    /// [EsbIrq](struct.EsbIrq.html) will be put in the Idle state
+    /// [EsbIrq](irq/struct.EsbIrq.html) will be put in the Idle state
     IncomingQueueFull,
 
     /// Unable to add item to the outgoing queue, queue is full
@@ -65,9 +130,9 @@ pub enum Error {
     /// Internal Error, if you encounter this error, please report it, it is a bug
     InternalError,
 
-    /// [EsbIrq](struct.EsbIrq.html) reached the maximum number of attempts to send a packet that
-    /// requested for an acknowledgement, the packet will be removed from the queue and
-    /// [EsbIrq](struct.EsbIrq.html) will try to send the next one
+    /// [EsbIrq](irq/struct.EsbIrq.html) reached the maximum number of attempts to send a packet
+    /// that requested for an acknowledgement, the packet will be removed from the queue and
+    /// [EsbIrq](irq/struct.EsbIrq.html) will try to send the next one
     MaximumAttempts,
 }
 

@@ -20,10 +20,6 @@ pub enum State {
     IdleTx,
     /// The radio is idle in PRX mode
     IdleRx,
-    /// The radio is preparing for reception in PTX mode
-    RampUpRx,
-    /// The radio is preparing for transmission.
-    RampUpTx,
     /// ESB on PTX state transmitting.
     TransmitterTx,
     TransmitterTxNoAck,
@@ -105,7 +101,6 @@ where
 
 struct Events {
     disabled: bool,
-    ready: bool,
     timer: bool,
 }
 
@@ -118,15 +113,11 @@ where
     /// Must be called inside the radio interrupt handler.
     #[allow(clippy::cognitive_complexity)]
     pub fn radio_interrupt(&mut self) -> Result<State, Error> {
-        let Events {
-            disabled,
-            ready,
-            timer,
-        } = self.check_and_clear_flags();
+        let Events { disabled, timer } = self.check_and_clear_flags();
 
         // We only trigger the interrupt in these three events, if we didn't trigger it then the
         // user did.
-        let user_event = !disabled && !ready && !timer;
+        let user_event = !disabled && !timer;
 
         if user_event && !(self.state == State::IdleTx || self.state == State::IdleRx) {
             return Ok(self.state);
@@ -148,25 +139,8 @@ where
                 self.radio.finish_tx_no_ack();
                 self.send_packet();
             }
-            State::RampUpTx => {
-                debug_assert!(
-                    ready,
-                    "RampUpTx de: {}, re: {}, te: {}",
-                    disabled, ready, timer
-                );
-
-                // The radio will be disabled if we retransmit, because of that we need to take into
-                // account the ramp-up time for TX
-                self.timer
-                    .set_interrupt_retransmit(self.config.retransmit_delay - RAMP_UP_TIME);
-                self.state = State::TransmitterTx;
-            }
             State::TransmitterTx => {
-                debug_assert!(
-                    disabled,
-                    "TransmitterTx de: {}, re: {}, te: {}",
-                    disabled, ready, timer
-                );
+                debug_assert!(disabled, "TransmitterTx de: {}, te: {}", disabled, timer);
 
                 let packet = self
                     .prod_to_app
@@ -174,25 +148,21 @@ where
                     .map(PayloadW::new_from_radio);
                 if let Ok(packet) = packet {
                     self.radio.prepare_for_ack(packet);
-                    self.state = State::RampUpRx;
+                    self.state = State::TransmitterWaitAck;
                 } else {
                     self.radio.stop(true);
-                    Timer::clear_interrupt_retransmit();
                     self.state = State::IdleTx;
                     return Err(Error::IncomingQueueFull);
                 }
-            }
-            State::RampUpRx => {
-                debug_assert!(
-                    ready,
-                    "RampUpRx de: {}, re: {}, te: {}",
-                    disabled, ready, timer
-                );
 
-                self.radio.disable_ready_interrupt();
+                // The radio will be disabled if we retransmit, because of that we need to take into
+                // account the ramp-up time for TX
                 self.timer
-                    .set_interrupt_ack(self.config.wait_for_ack_timeout);
-                self.state = State::TransmitterWaitAck;
+                    .set_interrupt_retransmit(self.config.retransmit_delay - RAMP_UP_TIME);
+
+                // Takes into account the RX ramp-up time
+                self.timer
+                    .set_interrupt_ack(self.config.wait_for_ack_timeout + RAMP_UP_TIME);
             }
             State::TransmitterWaitAck => {
                 let mut retransmit = false;
@@ -210,11 +180,7 @@ where
                         retransmit = true;
                     }
                 } else {
-                    debug_assert!(
-                        timer,
-                        "TransmitterWaitAck de: {}, re: {}, te: {}",
-                        disabled, ready, timer
-                    );
+                    debug_assert!(timer, "TransmitterWaitAck de: {}, te: {}", disabled, timer);
                     // Ack timeout
                     retransmit = true;
                 }
@@ -239,18 +205,14 @@ where
             State::TransmitterWaitRetransmit => {
                 debug_assert!(
                     timer,
-                    "TransmitterWaitRetransmit de: {}, re: {}, te: {}",
-                    disabled, ready, timer
+                    "TransmitterWaitRetransmit de: {}, te: {}",
+                    disabled, timer
                 );
                 // The timer interrupt cleared and stopped the timer by now
                 self.send_packet();
             }
             State::Receiver => {
-                debug_assert!(
-                    disabled,
-                    "Receiver de: {}, re: {}, te: {}",
-                    disabled, ready, timer
-                );
+                debug_assert!(disabled, "Receiver de: {}, te: {}", disabled, timer);
                 // We got a packet, check it
                 match self.radio.check_packet(&mut self.cons_from_app)? {
                     // Do nothing, the radio will return to rx
@@ -274,11 +236,7 @@ where
                 }
             }
             State::TransmittingAck => {
-                debug_assert!(
-                    disabled,
-                    "TransmittingAck de: {}, re: {}, te: {}",
-                    disabled, ready, timer
-                );
+                debug_assert!(disabled, "TransmittingAck de: {}, te: {}", disabled, timer);
                 // We finished transmitting the acknowledgement, get ready for the next packet
                 self.prepare_receiver(|this, grant| {
                     // This goes back to rx
@@ -290,8 +248,8 @@ where
             State::TransmittingRepeatedAck => {
                 debug_assert!(
                     disabled,
-                    "TransmittingRepeatedAck de: {}, re: {}, te: {}",
-                    disabled, ready, timer
+                    "TransmittingRepeatedAck de: {}, te: {}",
+                    disabled, timer
                 );
                 // This goes back to rx
                 self.radio.complete_rx_ack(None)?;
@@ -300,8 +258,8 @@ where
             State::IdleRx => {
                 debug_assert!(
                     user_event,
-                    "TransmittingRepeatedAck de: {}, re: {}, te: {}",
-                    disabled, ready, timer
+                    "TransmittingRepeatedAck de: {}, te: {}",
+                    disabled, timer
                 );
                 self.start_receiving()?;
             }
@@ -309,7 +267,7 @@ where
         Ok(self.state)
     }
 
-    /// Changes the stack to the receiving state
+    /// Changes esb to the receiving state
     pub fn start_receiving(&mut self) -> Result<(), Error> {
         if self.state != State::IdleTx || self.state != State::IdleRx {
             // Put the radio in a known state
@@ -325,19 +283,26 @@ where
         })
     }
 
+    /// Stops the receiving
+    pub fn stop_receiving(&mut self) {
+        // Put the radio in a known state
+        self.radio.stop(true);
+        Timer::clear_interrupt_retransmit();
+        Timer::clear_interrupt_ack();
+        let _ = self.check_and_clear_flags();
+
+        self.state = State::IdleRx;
+    }
+
     #[inline]
     fn check_and_clear_flags(&mut self) -> Events {
         let evts = Events {
             disabled: self.radio.check_disabled_event(),
-            ready: self.radio.check_ready_event(),
             timer: self.timer_flag.load(Ordering::Acquire),
         };
 
         if evts.disabled {
             self.radio.clear_disabled_event();
-        }
-        if evts.ready {
-            self.radio.clear_ready_event();
         }
         if evts.timer {
             self.timer_flag.store(false, Ordering::Release);
@@ -354,7 +319,7 @@ where
             let ack = !packet.no_ack();
             self.radio.transmit(packet, ack);
             if ack {
-                self.state = State::RampUpTx;
+                self.state = State::TransmitterTx;
             } else {
                 self.state = State::TransmitterTxNoAck;
             }
