@@ -9,6 +9,29 @@ use bbqueue::{
 };
 use core::default::Default;
 
+/// Driver's maximum payload size
+///
+/// Can be acquired through [EsbApp](struct.EsbApp.html)
+#[derive(Copy, Clone)]
+pub struct DriverMaximumPayload {
+    pub(crate) inner_checked: u8,
+}
+
+impl DriverMaximumPayload {
+    /// Creates a `DriverMaximumPayload` with an unchecked value. It is recommended to use the
+    /// `maximum_payload_size` method from [EsbApp](struct.EsbApp.html) instead of this one
+    ///
+    /// # Safety
+    ///
+    /// The value passed to this method must be the same as the one in the `Config` struct used
+    /// to initialize the driver
+    pub const unsafe fn new_unchecked(maximum: u8) -> Self {
+        DriverMaximumPayload {
+            inner_checked: maximum,
+        }
+    }
+}
+
 /// This is the primary Application-side interface.
 ///
 /// It is intended to be used outside of the `RADIO` interrupt,
@@ -23,6 +46,7 @@ where
     // need to make these fields pub(crate)
     pub(crate) prod_to_radio: FrameProducer<'static, OutgoingLen>,
     pub(crate) cons_from_radio: FrameConsumer<'static, IncomingLen>,
+    pub(crate) maximum_payload: DriverMaximumPayload,
 }
 
 impl<OutgoingLen, IncomingLen> EsbApp<OutgoingLen, IncomingLen>
@@ -60,6 +84,7 @@ where
     /// Starts the radio sending all packets in the queue.
     ///
     /// The radio will send until the queue has been drained.
+    #[inline]
     pub fn start_tx(&mut self) {
         // TODO(AJM): Is this appropriate for PRX? Or is this a PTX-only
         // sort of interface?
@@ -83,6 +108,12 @@ where
     pub fn read_packet(&mut self) -> Option<PayloadR<IncomingLen>> {
         self.cons_from_radio.read().map(PayloadR::new)
     }
+
+    /// Gets the maximum payload size that the driver was configured to use
+    #[inline]
+    pub fn maximum_payload_size(&self) -> DriverMaximumPayload {
+        self.maximum_payload
+    }
 }
 
 /// Addresses used for communication.
@@ -90,6 +121,17 @@ where
 /// ESB uses up to eight pipes to address communication, each pipe has an unique address which is
 /// composed by the base address and the prefix. Pipe 0 has an unique base and prefix, while the
 /// other pipes share a base address but have different prefixes.
+///
+/// Default values:
+///
+/// | Field      | Default Value            |
+/// | :---       | :---                     |
+/// | base0      | [0xE7, 0xE7, 0xE7, 0xE7] |
+/// | base1      | [0xC2, 0xC2, 0xC2, 0xC2] |
+/// | prefixes0  | [0xE7, 0xC2, 0xC3, 0xC4] |
+/// | prefixes1  | [0xC5, 0xC6, 0xC7, 0xC8] |
+/// | rf_channel | 2                        |
+///
 pub struct Addresses {
     /// Base address for pipe 0
     pub(crate) base0: [u8; 4],
@@ -103,6 +145,7 @@ pub struct Addresses {
     pub(crate) rf_channel: u8,
 }
 
+// TODO: make a builder
 impl Addresses {
     /// Creates a new instance of `Addresses`
     ///

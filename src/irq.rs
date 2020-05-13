@@ -144,7 +144,7 @@ where
 
                 let packet = self
                     .prod_to_app
-                    .grant(self.radio.max_payload() as usize + EsbHeader::header_size())
+                    .grant(self.config.maximum_payload_size as usize + EsbHeader::header_size())
                     .map(PayloadW::new_from_radio);
                 if let Ok(packet) = packet {
                     self.radio.prepare_for_ack(packet);
@@ -335,7 +335,7 @@ where
     {
         if let Ok(grant) = self
             .prod_to_app
-            .grant(self.radio.max_payload() as usize + EsbHeader::header_size())
+            .grant(self.config.maximum_payload_size as usize + EsbHeader::header_size())
             .map(PayloadW::new_from_radio)
         {
             f(self, grant)?;

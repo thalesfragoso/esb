@@ -18,7 +18,7 @@ use crate::{
     payload::{PayloadR, PayloadW},
     Error,
 };
-pub(crate) use pac::{Interrupt, NVIC, RADIO};
+pub(crate) use pac::{radio::txpower::TXPOWER_A, Interrupt, NVIC, RADIO};
 
 const CRC_INIT: u32 = 0x0000_FFFF;
 const CRC_POLY: u32 = 0x0001_1021;
@@ -54,7 +54,6 @@ where
     last_crc: [u16; NUM_PIPES],
     last_pid: [u8; NUM_PIPES],
     cached_pipe: u8,
-    max_payload: u8,
 }
 
 impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
@@ -70,16 +69,10 @@ where
             last_crc: [0; NUM_PIPES],
             last_pid: [0; NUM_PIPES],
             cached_pipe: 0,
-            max_payload: 0,
         }
     }
 
-    #[inline]
-    pub(crate) fn max_payload(&self) -> u8 {
-        self.max_payload
-    }
-
-    pub(crate) fn init(&mut self, max_payload: u8, addresses: &Addresses) {
+    pub(crate) fn init(&mut self, max_payload: u8, tx_power: TXPOWER_A, addresses: &Addresses) {
         // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
         self.radio
             .intenclr
@@ -107,7 +100,7 @@ where
         #[cfg(feature = "fast-ru")]
         self.radio.modecnf0.modify(|_, w| w.ru().fast());
 
-        // TODO: configurable tx_power
+        self.radio.txpower.write(|w| w.txpower().variant(tx_power));
         unsafe {
             self.radio
                 .pcnf0
@@ -150,7 +143,6 @@ where
                 .frequency
                 .write(|w| w.frequency().bits(addresses.rf_channel));
         }
-        self.max_payload = max_payload;
     }
 
     // Clears the Disabled event to not retrigger the interrupt
