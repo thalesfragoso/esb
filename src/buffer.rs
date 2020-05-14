@@ -1,5 +1,5 @@
 use crate::{
-    app::{Addresses, DriverMaximumPayload, EsbApp},
+    app::{Addresses, EsbApp},
     irq::{EsbIrq, IrqTimer, State},
     peripherals::{EsbRadio, EsbTimer, RADIO},
     Config, Error,
@@ -95,9 +95,7 @@ where
         let app = EsbApp {
             prod_to_radio: atr_prod,
             cons_from_radio: rta_cons,
-            maximum_payload: DriverMaximumPayload {
-                inner_checked: config.maximum_payload_size,
-            },
+            maximum_payload: config.maximum_payload_size,
         };
 
         let mut irq = EsbIrq {

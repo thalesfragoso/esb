@@ -9,29 +9,6 @@ use bbqueue::{
 };
 use core::default::Default;
 
-/// Driver's maximum payload size
-///
-/// Can be acquired through [EsbApp](struct.EsbApp.html)
-#[derive(Copy, Clone)]
-pub struct DriverMaximumPayload {
-    pub(crate) inner_checked: u8,
-}
-
-impl DriverMaximumPayload {
-    /// Creates a `DriverMaximumPayload` with an unchecked value. It is recommended to use the
-    /// `maximum_payload_size` method from [EsbApp](struct.EsbApp.html) instead of this one
-    ///
-    /// # Safety
-    ///
-    /// The value passed to this method must be the same as the one in the `Config` struct used
-    /// to initialize the driver
-    pub const unsafe fn new_unchecked(maximum: u8) -> Self {
-        DriverMaximumPayload {
-            inner_checked: maximum,
-        }
-    }
-}
-
 /// This is the primary Application-side interface.
 ///
 /// It is intended to be used outside of the `RADIO` interrupt,
@@ -46,7 +23,7 @@ where
     // need to make these fields pub(crate)
     pub(crate) prod_to_radio: FrameProducer<'static, OutgoingLen>,
     pub(crate) cons_from_radio: FrameConsumer<'static, IncomingLen>,
-    pub(crate) maximum_payload: DriverMaximumPayload,
+    pub(crate) maximum_payload: u8,
 }
 
 impl<OutgoingLen, IncomingLen> EsbApp<OutgoingLen, IncomingLen>
@@ -69,6 +46,11 @@ where
     ///
     /// Only one grant may be active at a time.
     pub fn grant_packet(&mut self, header: EsbHeader) -> Result<PayloadW<OutgoingLen>, Error> {
+        // Check we have not exceeded the configured packet max
+        if header.length > self.maximum_payload {
+            return Err(Error::MaximumPacketExceeded);
+        }
+
         let grant_result = self
             .prod_to_radio
             .grant(header.payload_len() + EsbHeader::header_size());
@@ -109,10 +91,10 @@ where
         self.cons_from_radio.read().map(PayloadR::new)
     }
 
-    /// Gets the maximum payload size that the driver was configured to use
+    /// Gets the maximum payload size (in bytes) that the driver was configured to use
     #[inline]
-    pub fn maximum_payload_size(&self) -> DriverMaximumPayload {
-        self.maximum_payload
+    pub fn maximum_payload_size(&self) -> usize {
+        self.maximum_payload.into()
     }
 }
 
