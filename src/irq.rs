@@ -294,7 +294,6 @@ where
         self.state = State::IdleRx;
     }
 
-    #[inline]
     fn check_and_clear_flags(&mut self) -> Events {
         let evts = Events {
             disabled: self.radio.check_disabled_event(),

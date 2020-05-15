@@ -73,6 +73,13 @@
 //!
 //! The maximum in-queue packet size is 258 bytes (with a 252 bytes payload).
 //!
+//! # Compatibility with nRF24L01+
+//!
+//! This implementation is only compatible with nRF24L01+ devices when using a
+//! [configuration](struct.Config.html) with a maximum packet size no bigger than 32 bytes
+//! (inclusive). That is required because the nRF24L01+ only supports payloads up to that size and
+//! uses a 6-bits effective payload length that must be configured in the nRF5 radio.
+//!
 //! # Examples
 //!
 //! Usage examples can be found at the [demos repo](https://github.com/thalesfragoso/esb-demos).

@@ -165,12 +165,7 @@ impl EsbHeader {
     /// * `max_payload_length` must be between 0 and 252 bytes, inclusive.
     /// * `pid` must be between 0 and 3, inclusive.
     /// * `pipe` must be between 0 and 7, inclusive.
-    pub fn new(
-        max_payload_length: u8,
-        pid: u8,
-        pipe: u8,
-        no_ack: bool,
-    ) -> Result<Self, Error> {
+    pub fn new(max_payload_length: u8, pid: u8, pipe: u8, no_ack: bool) -> Result<Self, Error> {
         EsbHeaderBuilder::default()
             .max_payload(max_payload_length)
             .pid(pid)
