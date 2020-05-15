@@ -140,6 +140,9 @@ pub enum Error {
     /// Values out of range
     InvalidParameters,
 
+    // The requested packet was larger than the configured max payload size
+    MaximumPacketExceeded,
+
     /// Internal Error, if you encounter this error, please report it, it is a bug
     InternalError,
 

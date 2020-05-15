@@ -1,4 +1,4 @@
-use crate::{app::DriverMaximumPayload, Error};
+use crate::Error;
 use bbqueue::{
     framed::{FrameGrantR, FrameGrantW},
     ArrayLength,
@@ -16,17 +16,14 @@ use core::ops::{Deref, DerefMut};
 /// ## Example
 ///
 /// ```rust
-/// # use esb::app::DriverMaximumPayload;
 /// use esb::EsbHeaderBuilder;
 ///
-/// # let driver_maximum_payload = unsafe { DriverMaximumPayload::new_unchecked(252) };
-/// // `driver_maximum_payload` can be acquired through EsbApp::maximum_payload_size
 /// let header_result = EsbHeaderBuilder::default()
 ///     .max_payload(252)
 ///     .pid(0)
 ///     .pipe(0)
 ///     .no_ack(true)
-///     .check(driver_maximum_payload);
+///     .check();
 ///
 /// assert!(header_result.is_ok());
 /// ```
@@ -94,8 +91,8 @@ impl EsbHeaderBuilder {
     /// Finalize the header.
     ///
     /// If the set parameters are out of range, an error will be returned.
-    pub fn check(self, driver_maximum_payload: DriverMaximumPayload) -> Result<EsbHeader, Error> {
-        let bad_length = self.0.length > driver_maximum_payload.inner_checked;
+    pub fn check(self) -> Result<EsbHeader, Error> {
+        let bad_length = self.0.length > 252;
         let bad_pipe = self.0.pipe > 7;
 
         // This checks if "pid" > 3, where pid_no_ack is pid << 1.
@@ -118,24 +115,20 @@ impl EsbHeaderBuilder {
 /// ## Example
 ///
 /// ```rust
-/// # use esb::app::DriverMaximumPayload;
 /// use esb::EsbHeader;
 ///
-/// # let driver_maximum_payload = unsafe { DriverMaximumPayload::new_unchecked(252) };
-/// // `driver_maximum_payload` can be acquired through EsbApp::maximum_payload_size
 /// let builder_result = EsbHeader::build()
 ///     .max_payload(252)
 ///     .pid(0)
 ///     .pipe(1)
 ///     .no_ack(true)
-///     .check(driver_maximum_payload);
+///     .check();
 ///
 /// let new_result = EsbHeader::new(
 ///     252,
 ///     0,
 ///     1,
 ///     true,
-///     driver_maximum_payload,
 /// );
 ///
 /// assert_eq!(builder_result, new_result);
@@ -149,7 +142,7 @@ pub struct EsbHeader {
     // We just need to mask it out in EsbIrq before handing it
     // to the radio to process.
     pipe: u8,
-    length: u8,
+    pub(crate) length: u8,
     pid_no_ack: u8,
 }
 
@@ -177,14 +170,13 @@ impl EsbHeader {
         pid: u8,
         pipe: u8,
         no_ack: bool,
-        driver_maximum_payload: DriverMaximumPayload,
     ) -> Result<Self, Error> {
         EsbHeaderBuilder::default()
             .max_payload(max_payload_length)
             .pid(pid)
             .pipe(pipe)
             .no_ack(no_ack)
-            .check(driver_maximum_payload)
+            .check()
     }
 
     /// convert into a packed representation meant for internal
