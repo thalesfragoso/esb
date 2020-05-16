@@ -48,7 +48,7 @@ where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
 {
-    radio: RADIO,
+    pub(crate) radio: RADIO,
     tx_grant: Option<PayloadR<OutgoingLen>>,
     rx_grant: Option<PayloadW<IncomingLen>>,
     last_crc: [u16; NUM_PIPES],

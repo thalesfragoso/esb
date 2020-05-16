@@ -58,6 +58,71 @@ where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
 {
+    pub fn try_release<T: EsbTimer>(
+        &'static self,
+        mut app: EsbApp<OutgoingLen, IncomingLen>,
+        mut irq: EsbIrq<OutgoingLen, IncomingLen, T>,
+        timer: IrqTimer<T>,
+    ) -> Result<
+        (T, RADIO),
+        (
+            EsbApp<OutgoingLen, IncomingLen>,
+            EsbIrq<OutgoingLen, IncomingLen, T>,
+            IrqTimer<T>,
+        ),
+    > {
+        // TODO: We probably need to disable/ensure the radio is idle?
+        // TODO: @thalesfragoso help
+
+        let prod1 = app.prod_to_radio;
+        let cons1 = irq.cons_from_app;
+        let prod2 = irq.prod_to_app;
+        let cons2 = app.cons_from_radio;
+
+        let atr_res = self.app_to_radio_buf.try_release_framed(prod1, cons1);
+        let rta_res = self.radio_to_app_buf.try_release_framed(prod2, cons2);
+
+        match (atr_res, rta_res) {
+            (Ok(()), Ok(())) => {
+                // TODO: We probably want a `release` method on the `EsbIrq` structure
+                // that makes sure that we are idle, and gives us these items back, instead
+                // of just partially destructuring and making these fields pub(crate).
+                //
+                // That should probably be done up around the other TODO comment above,
+                // where we can early return a little easier
+                Ok((irq.timer, irq.radio.radio))
+            },
+            (Ok(()), Err((prod2, cons2))) => {
+                irq.prod_to_app = prod2;
+                app.cons_from_radio = cons2;
+
+                let (prod1, cons1) = self.app_to_radio_buf.try_split_framed().unwrap();
+                app.prod_to_radio = prod1;
+                irq.cons_from_app = cons1;
+
+                Err((app, irq, timer))
+            }
+            (Err((prod1, cons1)), Ok(())) => {
+                app.prod_to_radio = prod1;
+                irq.cons_from_app = cons1;
+
+                let (prod2, cons2) = self.radio_to_app_buf.try_split_framed().unwrap();
+                irq.prod_to_app = prod2;
+                app.cons_from_radio = cons2;
+
+                Err((app, irq, timer))
+            }
+            (Err((prod1, cons1)), Err((prod2, cons2))) => {
+                app.prod_to_radio = prod1;
+                irq.cons_from_app = cons1;
+                irq.prod_to_app = prod2;
+                app.cons_from_radio = cons2;
+
+                Err((app, irq, timer))
+            }
+        }
+    }
+
     /// Attempt to split the `static` buffer into handles for Interrupt and App context
     ///
     /// This function will only succeed once. If the underlying buffers have also
