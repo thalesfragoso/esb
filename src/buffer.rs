@@ -91,7 +91,7 @@ where
                 // That should probably be done up around the other TODO comment above,
                 // where we can early return a little easier
                 Ok((irq.timer, irq.radio.radio))
-            },
+            }
             (Ok(()), Err((prod2, cons2))) => {
                 irq.prod_to_app = prod2;
                 app.cons_from_radio = cons2;
