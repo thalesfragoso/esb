@@ -334,7 +334,7 @@ where
     {
         if let Ok(grant) = self
             .prod_to_app
-            .grant(self.config.maximum_payload_size.into() + EsbHeader::header_size())
+            .grant(usize::from(self.config.maximum_payload_size) + EsbHeader::header_size())
             .map(PayloadW::new_from_radio)
         {
             f(self, grant)?;
