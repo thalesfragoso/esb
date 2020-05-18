@@ -60,6 +60,26 @@
 //! communicating with devices that do not support it, the timing configuration must take this case
 //! into account.
 //!
+//! # In-queue packet representation
+//!
+//! This crate uses some bytes of queue space to pass information between the user and the driver.
+//! The user must take this into account when choosing the size of the
+//! [EsbBuffer](buffer/struct.EsbBuffer.html). Moreover, the characteristics of the underlying
+//! BipBuffer must be considered, for more information refer to [bbqueue docs](https://docs.rs/bbqueue).
+//!
+//! | Used by bbqueue framed    | SW USE                         |               ACTUAL DMA PART                                      |
+//! | :---                      | :---                           | :---                                                               |
+//! | frame_size - 1 to 2 bytes | rssi - 1 byte \| pipe - 1 byte | length - 1 byte \| pid_no_ack - 1 byte \| payload - 1 to 252 bytes |
+//!
+//! The maximum in-queue packet size is 258 bytes (with a 252 bytes payload).
+//!
+//! # Compatibility with nRF24L01+
+//!
+//! This implementation is only compatible with nRF24L01+ devices when using a
+//! [configuration](struct.Config.html) with a maximum packet size no bigger than 32 bytes
+//! (inclusive). That is required because the nRF24L01+ only supports payloads up to that size and
+//! uses a 6-bits effective payload length that must be configured in the nRF5 radio.
+//!
 //! # Examples
 //!
 //! Usage examples can be found at the [demos repo](https://github.com/thalesfragoso/esb-demos).
@@ -127,6 +147,9 @@ pub enum Error {
     /// Values out of range
     InvalidParameters,
 
+    // The requested packet was larger than the configured max payload size
+    MaximumPacketExceeded,
+
     /// Internal Error, if you encounter this error, please report it, it is a bug
     InternalError,
 
@@ -136,18 +159,29 @@ pub enum Error {
     MaximumAttempts,
 }
 
+/// Tx Power
+pub type TxPower = peripherals::TXPOWER_A;
+
 /// Protocol configuration
 #[derive(Copy, Clone)]
 pub struct Config {
     /// Number of microseconds to wait for an acknowledgement before timing out
     wait_for_ack_timeout: u16,
-    /// Delay, in microseconds, between retransmissions when the radio does not receive an acknowledgement
+    /// Delay, in microseconds, between retransmissions when the radio does not receive an
+    /// acknowledgement
     retransmit_delay: u16,
     /// Maximum number of transmit attempts when an acknowledgement is not received
     maximum_transmit_attempts: u8,
     /// A bit mask representing the pipes that the radio must listen while receiving, the LSb is
     /// pipe zero
     enabled_pipes: u8,
+    /// Tx Power
+    tx_power: TxPower,
+    /// Maximum payload size in bytes that the driver will send or receive.
+    ///
+    /// This allows for a more efficient usage of the receiver queue and makes this driver
+    /// compatible with nRF24L01+ modules when this size is 32 bytes or less
+    maximum_payload_size: u8,
 }
 
 impl Default for Config {
@@ -157,6 +191,8 @@ impl Default for Config {
             retransmit_delay: RETRANSMIT_DELAY,
             maximum_transmit_attempts: MAXIMUM_TRANSMIT_ATTEMPTS,
             enabled_pipes: ENABLED_PIPES,
+            tx_power: TxPower::_0DBM,
+            maximum_payload_size: 252,
         }
     }
 }
@@ -191,6 +227,8 @@ impl Default for Config {
 /// | Retransmit Delay                    | 500 us        |
 /// | Maximum number of transmit attempts | 3             |
 /// | Enabled Pipes                       | 0xFF          |
+/// | Tx Power                            | 0dBm          |
+/// | Maximum payload size                | 252 bytes     |
 ///
 pub struct ConfigBuilder(Config);
 
@@ -201,29 +239,41 @@ impl Default for ConfigBuilder {
 }
 
 impl ConfigBuilder {
-    /// Sets `wait_for_ack_timeout` field, must be bigger than 43 us
+    /// Sets number of microseconds to wait for an acknowledgement before timing out
     pub fn wait_for_ack_timeout(mut self, micros: u16) -> Self {
         self.0.wait_for_ack_timeout = micros;
         self
     }
 
     // TODO: document 62
-    /// Sets `retransmit_delay` field, must be bigger than `wait_for_ack_timeout` field plus 62 and
-    /// bigger than the ramp-up time (140us without fast-ru and 40us with fast-ru)
+    /// Sets retransmit delay, must be bigger than `wait_for_ack_timeout` field plus 62 and bigger
+    /// than the ramp-up time (140us without fast-ru and 40us with fast-ru)
     pub fn retransmit_delay(mut self, micros: u16) -> Self {
         self.0.retransmit_delay = micros;
         self
     }
 
-    /// Sets `maximum_transmit_attempts` field
+    /// Sets maximum number of transmit attempts
     pub fn maximum_transmit_attempts(mut self, n: u8) -> Self {
         self.0.maximum_transmit_attempts = n;
         self
     }
 
-    /// Sets `enabled_pipes` field
+    /// Sets enabled pipes for receiving
     pub fn enabled_pipes(mut self, enabled_pipes: u8) -> Self {
         self.0.enabled_pipes = enabled_pipes;
+        self
+    }
+
+    /// Sets the tx power
+    pub fn tx_power(mut self, tx_power: TxPower) -> Self {
+        self.0.tx_power = tx_power;
+        self
+    }
+
+    /// Sets the maximum payload size
+    pub fn max_payload_size(mut self, payload_size: u8) -> Self {
+        self.0.maximum_payload_size = payload_size;
         self
     }
 
@@ -232,8 +282,9 @@ impl ConfigBuilder {
         let bad_retransmit_delay = self.0.retransmit_delay
             <= self.0.wait_for_ack_timeout + RETRANSMIT_DELAY_US_OFFSET
             || self.0.retransmit_delay <= RAMP_UP_TIME;
+        let bad_size = self.0.maximum_payload_size > 252;
 
-        if bad_ack_timeout || bad_retransmit_delay {
+        if bad_ack_timeout || bad_retransmit_delay || bad_size {
             Err(Error::InvalidParameters)
         } else {
             Ok(self.0)

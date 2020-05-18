@@ -90,8 +90,7 @@ impl EsbHeaderBuilder {
 
     /// Finalize the header.
     ///
-    /// If the set parameters are out of range, an error will
-    /// be returned.
+    /// If the set parameters are out of range, an error will be returned.
     pub fn check(self) -> Result<EsbHeader, Error> {
         let bad_length = self.0.length > 252;
         let bad_pipe = self.0.pipe > 7;
@@ -143,7 +142,7 @@ pub struct EsbHeader {
     // We just need to mask it out in EsbIrq before handing it
     // to the radio to process.
     pipe: u8,
-    length: u8,
+    pub(crate) length: u8,
     pid_no_ack: u8,
 }
 

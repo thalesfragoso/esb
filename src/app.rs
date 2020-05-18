@@ -23,6 +23,7 @@ where
     // need to make these fields pub(crate)
     pub(crate) prod_to_radio: FrameProducer<'static, OutgoingLen>,
     pub(crate) cons_from_radio: FrameConsumer<'static, IncomingLen>,
+    pub(crate) maximum_payload: u8,
 }
 
 impl<OutgoingLen, IncomingLen> EsbApp<OutgoingLen, IncomingLen>
@@ -45,6 +46,11 @@ where
     ///
     /// Only one grant may be active at a time.
     pub fn grant_packet(&mut self, header: EsbHeader) -> Result<PayloadW<OutgoingLen>, Error> {
+        // Check we have not exceeded the configured packet max
+        if header.length > self.maximum_payload {
+            return Err(Error::MaximumPacketExceeded);
+        }
+
         let grant_result = self
             .prod_to_radio
             .grant(header.payload_len() + EsbHeader::header_size());
@@ -60,6 +66,7 @@ where
     /// Starts the radio sending all packets in the queue.
     ///
     /// The radio will send until the queue has been drained.
+    #[inline]
     pub fn start_tx(&mut self) {
         // TODO(AJM): Is this appropriate for PRX? Or is this a PTX-only
         // sort of interface?
@@ -83,6 +90,12 @@ where
     pub fn read_packet(&mut self) -> Option<PayloadR<IncomingLen>> {
         self.cons_from_radio.read().map(PayloadR::new)
     }
+
+    /// Gets the maximum payload size (in bytes) that the driver was configured to use
+    #[inline]
+    pub fn maximum_payload_size(&self) -> usize {
+        self.maximum_payload.into()
+    }
 }
 
 /// Addresses used for communication.
@@ -90,6 +103,17 @@ where
 /// ESB uses up to eight pipes to address communication, each pipe has an unique address which is
 /// composed by the base address and the prefix. Pipe 0 has an unique base and prefix, while the
 /// other pipes share a base address but have different prefixes.
+///
+/// Default values:
+///
+/// | Field      | Default Value            |
+/// | :---       | :---                     |
+/// | base0      | [0xE7, 0xE7, 0xE7, 0xE7] |
+/// | base1      | [0xC2, 0xC2, 0xC2, 0xC2] |
+/// | prefixes0  | [0xE7, 0xC2, 0xC3, 0xC4] |
+/// | prefixes1  | [0xC5, 0xC6, 0xC7, 0xC8] |
+/// | rf_channel | 2                        |
+///
 pub struct Addresses {
     /// Base address for pipe 0
     pub(crate) base0: [u8; 4],
@@ -103,6 +127,7 @@ pub struct Addresses {
     pub(crate) rf_channel: u8,
 }
 
+// TODO: make a builder
 impl Addresses {
     /// Creates a new instance of `Addresses`
     ///

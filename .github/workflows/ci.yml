@@ -32,6 +32,9 @@ jobs:
           - feature: 52840,
             target: thumbv7em-none-eabihf
             rust: stable
+          - feature: 52832,fast-ru,
+            target: thumbv7em-none-eabihf
+            rust: stable
 
     steps:
       - uses: actions/checkout@v2
