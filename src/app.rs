@@ -65,7 +65,8 @@ where
 
     /// Starts the radio sending all packets in the queue.
     ///
-    /// The radio will send until the queue has been drained.
+    /// The radio will send until the queue has been drained. This method must be called again if
+    /// the queue is completely drained before the user commits new packets.
     #[inline]
     pub fn start_tx(&mut self) {
         // TODO(AJM): Is this appropriate for PRX? Or is this a PTX-only
@@ -83,7 +84,7 @@ where
         self.cons_from_radio.read().is_some()
     }
 
-    /// Attempt to read a packet that has been received via the radio
+    /// Attempt to read a packet that has been received via the radio.
     ///
     /// Returns `Some(PayloadR)` if a packet is ready to be read,
     /// otherwise `None`.
@@ -91,7 +92,7 @@ where
         self.cons_from_radio.read().map(PayloadR::new)
     }
 
-    /// Gets the maximum payload size (in bytes) that the driver was configured to use
+    /// Gets the maximum payload size (in bytes) that the driver was configured to use.
     #[inline]
     pub fn maximum_payload_size(&self) -> usize {
         self.maximum_payload.into()

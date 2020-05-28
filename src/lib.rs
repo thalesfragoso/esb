@@ -98,7 +98,7 @@ pub mod payload;
 pub use crate::{
     app::{Addresses, EsbApp},
     buffer::EsbBuffer,
-    irq::{EsbIrq, IrqTimer, State},
+    irq::{EsbIrq, IrqTimer},
     payload::{EsbHeader, EsbHeaderBuilder},
 };
 
