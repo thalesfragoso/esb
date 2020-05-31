@@ -1,6 +1,6 @@
 use crate::{
     app::{Addresses, EsbApp},
-    irq::{EsbIrq, IrqTimer, State},
+    irq::{Disabled, EsbIrq, IrqTimer},
     peripherals::{EsbRadio, EsbTimer, RADIO},
     Config, Error,
 };
@@ -75,7 +75,7 @@ where
     ) -> Result<
         (
             EsbApp<OutgoingLen, IncomingLen>,
-            EsbIrq<OutgoingLen, IncomingLen, T>,
+            EsbIrq<OutgoingLen, IncomingLen, T, Disabled>,
             IrqTimer<T>,
         ),
         Error,
@@ -103,7 +103,7 @@ where
             cons_from_app: atr_cons,
             timer,
             radio: EsbRadio::new(radio),
-            state: State::IdleTx,
+            state: Disabled,
             addresses,
             attempts: 0,
             timer_flag: &self.timer_flag,
