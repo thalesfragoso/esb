@@ -82,17 +82,16 @@
 //!
 //! # Examples
 //!
-//! Usage examples can be found at the [demos repo](https://github.com/thalesfragoso/esb-demos).
+//! Usage examples can be found at the [demos repository](https://github.com/thalesfragoso/esb-demos).
 //!
 
 #![no_std]
-
-pub mod peripherals;
 
 pub mod app;
 pub mod buffer;
 pub mod irq;
 pub mod payload;
+pub mod peripherals;
 
 // Export crate relevant items
 pub use crate::{
@@ -113,7 +112,6 @@ const RETRANSMIT_DELAY: u16 = 500;
 const MAXIMUM_TRANSMIT_ATTEMPTS: u8 = 3;
 const ENABLED_PIPES: u8 = 0xFF;
 
-// TODO: Document Ramp-up time
 #[cfg(not(feature = "fast-ru"))]
 pub(crate) const RAMP_UP_TIME: u16 = 140;
 
@@ -124,9 +122,6 @@ pub(crate) const RAMP_UP_TIME: u16 = 40;
 /// Crate-wide error type
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
-    // TODO(AJM): Do we still need these?
-    // EOF,
-    // InProgress,
     /// Unable to add item to the incoming queue, queue is full. After issuing this error,
     /// [EsbIrq](irq/struct.EsbIrq.html) will be put in the Idle state
     IncomingQueueFull,

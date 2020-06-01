@@ -283,6 +283,12 @@ where
         (&self.grant[EsbHeader::dma_payload_offset()..]).as_ptr()
     }
 
+    /// Utility method to use with the CCM peripheral present in Nordic's devices. This gives a
+    /// slice starting from the pipe field of the header.
+    pub fn ccm_slice(&self) -> &[u8] {
+        &self.grant[EsbHeader::pipe_idx()..]
+    }
+
     /// An accessor function for the pipe of the current grant
     pub fn pipe(&self) -> u8 {
         self.grant[EsbHeader::pipe_idx()]
@@ -354,6 +360,28 @@ where
         // appropriate here
         header.length = header.length.min(self.payload_len() as u8);
         self.grant[..EsbHeader::header_size()].copy_from_slice(&header.into_bytes().0);
+    }
+
+    /// Utility method to use with the CCM peripheral present in Nordic's devices. This gives a
+    /// slice starting from the pipe field of the header.
+    ///
+    /// # Safety
+    ///
+    /// This gives raw mutable access to the header part of the packet, modification on these parts
+    /// are not checked, the user must ensure that:
+    ///     - The pipe field remains in a valid range.
+    ///     - The `pid_no_ack` remains valid and accepted by the esb protocol.
+    ///     - The length field remains smaller or equal than the length used when requesting this
+    ///       particular `PayloadW`.
+    ///
+    /// This method is not a recommended way to update the header, it is here to provide a way to
+    /// use this abstraction with the CCM hardware peripheral.
+    /// The length field present in this slice contains the payload length requested during the
+    /// creation of this type, that is, the maximum payload size that this particular grant can
+    /// contain. When using this slice to store the output of the CCM operation, the CCM peripheral
+    /// will modify this field, the user must ensure that this field remains in a valid range.
+    pub unsafe fn ccm_slice(&mut self) -> &mut [u8] {
+        &mut self.grant[EsbHeader::pipe_idx()..]
     }
 
     /// Obtain a writable grant from the application side.

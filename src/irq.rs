@@ -218,10 +218,7 @@ where
         match self.state {
             StatePTX::IdleTx => {
                 // Interrupt received means that the user pushed a packet to the queue.
-
-                // TODO: Sometimes we get a wrong timer interrupt here, found out what is the
-                // problem
-                //debug_assert!(user_event);
+                debug_assert!(user_event, "TransmitterTx de: {}, te: {}", disabled, timer);
                 if user_event {
                     self.send_packet();
                 }
