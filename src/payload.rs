@@ -336,7 +336,6 @@ where
     }
 }
 
-
 pub struct PayloadW<N: ArrayLength<u8>> {
     grant: FrameGrantW<'static, N>,
 }
