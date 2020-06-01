@@ -369,10 +369,11 @@ where
     ///
     /// This gives raw mutable access to the header part of the packet, modification on these parts
     /// are not checked, the user must ensure that:
-    ///     - The pipe field remains in a valid range.
-    ///     - The `pid_no_ack` remains valid and accepted by the esb protocol.
-    ///     - The length field remains smaller or equal than the length used when requesting this
-    ///       particular `PayloadW`.
+    ///
+    /// * The pipe field remains in a valid range.
+    /// * The pid_no_ack remains valid and accepted by the esb protocol.
+    /// * The length field remains smaller or equal than the length used when requesting this
+    ///   particular PayloadW.
     ///
     /// This method is not a recommended way to update the header, it is here to provide a way to
     /// use this abstraction with the CCM hardware peripheral.

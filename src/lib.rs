@@ -1,7 +1,5 @@
 //! Rust implementation of Nordic's Enhanced ShockBurst communication protocol
 //!
-//! State: **beta**
-//!
 //! This crate implements the Enhanced ShockBurst protocol with dynamic payload size up to 252 bytes
 //! and acknowledgement support.
 //!
