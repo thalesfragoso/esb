@@ -326,6 +326,17 @@ where
     }
 }
 
+impl<N> DerefMut for PayloadR<N>
+where
+    N: ArrayLength<u8>,
+{
+    /// provide read/write access to the payload portion of the grant
+    fn deref_mut(&mut self) -> &mut [u8] {
+        &mut self.grant[EsbHeader::header_size()..]
+    }
+}
+
+
 pub struct PayloadW<N: ArrayLength<u8>> {
     grant: FrameGrantW<'static, N>,
 }
