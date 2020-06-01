@@ -128,7 +128,6 @@ pub struct Addresses {
     pub(crate) rf_channel: u8,
 }
 
-// TODO: make a builder
 impl Addresses {
     /// Creates a new instance of `Addresses`
     ///
