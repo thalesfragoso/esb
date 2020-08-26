@@ -318,6 +318,12 @@ where
     pub fn release(self) {
         self.grant.release()
     }
+
+    /// Set whether the payload should automatically release on drop
+    #[inline(always)]
+    pub fn auto_release(&mut self, is_auto: bool) {
+        self.grant.auto_release(is_auto);
+    }
 }
 
 impl<N> Deref for PayloadR<N>
@@ -456,6 +462,13 @@ where
     pub fn commit_all(self) {
         let payload_len = self.payload_len();
         self.grant.commit(payload_len + EsbHeader::header_size())
+    }
+
+    /// Set the amount to automatically commit on drop
+    pub fn to_commit(&mut self, amt: usize) {
+        let payload_len = self.payload_len().min(amt);
+        self.grant[EsbHeader::length_idx()] = payload_len as u8;
+        self.grant.to_commit(payload_len + EsbHeader::header_size());
     }
 
     /// Commit the packed, including the first `used` bytes of the payload
