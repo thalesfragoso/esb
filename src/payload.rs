@@ -466,9 +466,13 @@ where
 
     /// Set the amount to automatically commit on drop
     pub fn to_commit(&mut self, amt: usize) {
-        let payload_len = self.payload_len().min(amt);
-        self.grant[EsbHeader::length_idx()] = payload_len as u8;
-        self.grant.to_commit(payload_len + EsbHeader::header_size());
+        if amt == 0 {
+            self.grant.to_commit(0);
+        } else {
+            let payload_len = self.payload_len().min(amt);
+            self.grant[EsbHeader::length_idx()] = payload_len as u8;
+            self.grant.to_commit(payload_len + EsbHeader::header_size());
+        }
     }
 
     /// Commit the packed, including the first `used` bytes of the payload
