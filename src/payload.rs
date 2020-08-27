@@ -465,13 +465,16 @@ where
     }
 
     /// Set the amount to automatically commit on drop
-    pub fn to_commit(&mut self, amt: usize) {
-        if amt == 0 {
-            self.grant.to_commit(0);
-        } else {
+    ///
+    /// If `None` is given, then the packet will not be commited. If `Some(0)`
+    /// is given, then an empty packet will be committed automatically
+    pub fn to_commit(&mut self, amt: Option<usize>) {
+        if let Some(amt) = amt {
             let payload_len = self.payload_len().min(amt);
             self.grant[EsbHeader::length_idx()] = payload_len as u8;
             self.grant.to_commit(payload_len + EsbHeader::header_size());
+        } else {
+            self.grant.to_commit(0);
         }
     }
 
