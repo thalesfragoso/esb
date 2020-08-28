@@ -374,7 +374,8 @@ where
 
         // `length` must always be 0..=252 (checked by constructor), so `u8` cast is
         // appropriate here
-        header.length = header.length.min(self.payload_len() as u8);
+        let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size());
+        header.length = header.length.min(payload_max as u8);
         self.grant[..EsbHeader::header_size()].copy_from_slice(&header.into_bytes().0);
     }
 
@@ -470,7 +471,8 @@ where
     /// is given, then an empty packet will be committed automatically
     pub fn to_commit(&mut self, amt: Option<usize>) {
         if let Some(amt) = amt {
-            let payload_len = self.payload_len().min(amt);
+            let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size());
+            let payload_len = payload_max.min(amt);
             self.grant[EsbHeader::length_idx()] = payload_len as u8;
             self.grant.to_commit(payload_len + EsbHeader::header_size());
         } else {
