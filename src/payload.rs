@@ -318,6 +318,12 @@ where
     pub fn release(self) {
         self.grant.release()
     }
+
+    /// Set whether the payload should automatically release on drop
+    #[inline(always)]
+    pub fn auto_release(&mut self, is_auto: bool) {
+        self.grant.auto_release(is_auto);
+    }
 }
 
 impl<N> Deref for PayloadR<N>
@@ -368,7 +374,8 @@ where
 
         // `length` must always be 0..=252 (checked by constructor), so `u8` cast is
         // appropriate here
-        header.length = header.length.min(self.payload_len() as u8);
+        let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size());
+        header.length = header.length.min(payload_max as u8);
         self.grant[..EsbHeader::header_size()].copy_from_slice(&header.into_bytes().0);
     }
 
@@ -456,6 +463,21 @@ where
     pub fn commit_all(self) {
         let payload_len = self.payload_len();
         self.grant.commit(payload_len + EsbHeader::header_size())
+    }
+
+    /// Set the amount to automatically commit on drop
+    ///
+    /// If `None` is given, then the packet will not be commited. If `Some(0)`
+    /// is given, then an empty packet will be committed automatically
+    pub fn to_commit(&mut self, amt: Option<usize>) {
+        if let Some(amt) = amt {
+            let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size());
+            let payload_len = payload_max.min(amt);
+            self.grant[EsbHeader::length_idx()] = payload_len as u8;
+            self.grant.to_commit(payload_len + EsbHeader::header_size());
+        } else {
+            self.grant.to_commit(0);
+        }
     }
 
     /// Commit the packed, including the first `used` bytes of the payload
