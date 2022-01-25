@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Changed
 
-- Update bbqueue to `0.4.10`.
+- Update bbqueue to `0.5.1`.
 
 ### Added
 

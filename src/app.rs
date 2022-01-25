@@ -5,7 +5,7 @@ use crate::{
 };
 use bbqueue::{
     framed::{FrameConsumer, FrameProducer},
-    ArrayLength, Error as BbqError,
+    Error as BbqError,
 };
 use core::default::Default;
 
@@ -14,23 +14,15 @@ use core::default::Default;
 /// It is intended to be used outside of the `RADIO` interrupt,
 /// and allows for sending or receiving frames from the ESB Radio
 /// hardware.
-pub struct EsbApp<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
-{
+pub struct EsbApp<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> {
     // TODO(AJM): Make a constructor for this so we don't
     // need to make these fields pub(crate)
-    pub(crate) prod_to_radio: FrameProducer<'static, OutgoingLen>,
-    pub(crate) cons_from_radio: FrameConsumer<'static, IncomingLen>,
+    pub(crate) prod_to_radio: FrameProducer<'static, OUTGOING_LEN>,
+    pub(crate) cons_from_radio: FrameConsumer<'static, INCOMING_LEN>,
     pub(crate) maximum_payload: u8,
 }
 
-impl<OutgoingLen, IncomingLen> EsbApp<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
-{
+impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbApp<OUTGOING_LEN, INCOMING_LEN> {
     /// Obtain a grant for an outgoing packet to be sent over the Radio
     ///
     /// When space is available, this function will return a [`PayloadW`],
@@ -45,7 +37,7 @@ where
     /// `drop` the old grant, and create a new one.
     ///
     /// Only one grant may be active at a time.
-    pub fn grant_packet(&mut self, header: EsbHeader) -> Result<PayloadW<OutgoingLen>, Error> {
+    pub fn grant_packet(&mut self, header: EsbHeader) -> Result<PayloadW<OUTGOING_LEN>, Error> {
         // Check we have not exceeded the configured packet max
         if header.length > self.maximum_payload {
             return Err(Error::MaximumPacketExceeded);
@@ -88,7 +80,7 @@ where
     ///
     /// Returns `Some(PayloadR)` if a packet is ready to be read,
     /// otherwise `None`.
-    pub fn read_packet(&mut self) -> Option<PayloadR<IncomingLen>> {
+    pub fn read_packet(&mut self) -> Option<PayloadR<INCOMING_LEN>> {
         self.cons_from_radio.read().map(PayloadR::new)
     }
 

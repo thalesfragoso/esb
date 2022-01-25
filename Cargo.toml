@@ -1,12 +1,16 @@
 [package]
 name = "esb"
+
+# TODO: Breaking changes since 0.1.x! Must be updated
+# before release!
 version = "0.1.0"
+
 edition = "2018"
 description = "Implementation of Nordic's Enhanced ShockBurst communication protocol"
 
 authors = [
     "Thales Fragoso <thales.fragosoz@gmail.com>",
-    "James Munns <james.munns@ferrous-systems.com>"
+    "James Munns <james@onevariable.com>"
 ]
 
 repository = "https://github.com/thalesfragoso/esb"
@@ -30,13 +34,13 @@ nrf52840-pac = { version = "0.10.1", optional = true }
 log = { version = "0.4.8", optional = true }
 
 [dependencies.bbqueue]
-version = "0.4.10"
+version = "0.5.1"
 default-features = false
 
 [features]
 fast-ru = []
 51 = ["nrf51-pac", "bbqueue/thumbv6"]
-52810 = ["nrf52810-pac", "bbqueue/atomic"]
-52832 = ["nrf52832-pac", "bbqueue/atomic"]
-52833 = ["nrf52833-pac", "bbqueue/atomic"]
-52840 = ["nrf52840-pac", "bbqueue/atomic"]
+52810 = ["nrf52810-pac"]
+52832 = ["nrf52832-pac"]
+52833 = ["nrf52833-pac"]
+52840 = ["nrf52840-pac"]
