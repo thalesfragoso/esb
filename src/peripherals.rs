@@ -46,8 +46,7 @@ pub(crate) enum RxPayloadState {
     BadCRC,
 }
 
-pub struct EsbRadio<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
-{
+pub struct EsbRadio<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> {
     radio: RADIO,
     tx_grant: Option<PayloadR<OUTGOING_LEN>>,
     rx_grant: Option<PayloadW<INCOMING_LEN>>,
@@ -56,8 +55,7 @@ pub struct EsbRadio<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
     cached_pipe: u8,
 }
 
-impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbRadio<OUTGOING_LEN, INCOMING_LEN>
-{
+impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbRadio<OUTGOING_LEN, INCOMING_LEN> {
     pub(crate) fn new(radio: RADIO) -> Self {
         EsbRadio {
             radio,
@@ -309,7 +307,11 @@ impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbRadio<OUTGOING_LEN
     // --------------- PRX methods --------------- //
 
     // Start listening for packets and setup necessary shorts and interrupts
-    pub(crate) fn start_receiving(&mut self, mut rx_buf: PayloadW<INCOMING_LEN>, enabled_pipes: u8) {
+    pub(crate) fn start_receiving(
+        &mut self,
+        mut rx_buf: PayloadW<INCOMING_LEN>,
+        enabled_pipes: u8,
+    ) {
         // Start TX after receiving a packet as it might need an ack
         self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
 

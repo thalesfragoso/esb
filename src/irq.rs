@@ -107,7 +107,8 @@ struct Events {
     timer: bool,
 }
 
-impl<Timer, STATE, const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbIrq<Timer, STATE, OUTGOING_LEN, INCOMING_LEN>
+impl<Timer, STATE, const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
+    EsbIrq<Timer, STATE, OUTGOING_LEN, INCOMING_LEN>
 where
     Timer: EsbTimer,
 {
@@ -152,7 +153,8 @@ where
     }
 }
 
-impl<Timer, const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbIrq<Timer, Disabled, OUTGOING_LEN, INCOMING_LEN>
+impl<Timer, const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
+    EsbIrq<Timer, Disabled, OUTGOING_LEN, INCOMING_LEN>
 where
     Timer: EsbTimer,
 {
@@ -188,7 +190,8 @@ where
     }
 }
 
-impl<Timer, const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbIrq<Timer, StatePTX, OUTGOING_LEN, INCOMING_LEN>
+impl<Timer, const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
+    EsbIrq<Timer, StatePTX, OUTGOING_LEN, INCOMING_LEN>
 where
     Timer: EsbTimer,
 {
@@ -309,7 +312,8 @@ where
     }
 }
 
-impl<Timer, const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbIrq<Timer, StatePRX, OUTGOING_LEN, INCOMING_LEN>
+impl<Timer, const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
+    EsbIrq<Timer, StatePRX, OUTGOING_LEN, INCOMING_LEN>
 where
     Timer: EsbTimer,
 {

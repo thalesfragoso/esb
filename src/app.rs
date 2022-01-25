@@ -14,8 +14,7 @@ use core::default::Default;
 /// It is intended to be used outside of the `RADIO` interrupt,
 /// and allows for sending or receiving frames from the ESB Radio
 /// hardware.
-pub struct EsbApp<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
-{
+pub struct EsbApp<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> {
     // TODO(AJM): Make a constructor for this so we don't
     // need to make these fields pub(crate)
     pub(crate) prod_to_radio: FrameProducer<'static, OUTGOING_LEN>,
@@ -23,8 +22,7 @@ pub struct EsbApp<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
     pub(crate) maximum_payload: u8,
 }
 
-impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbApp<OUTGOING_LEN, INCOMING_LEN>
-{
+impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbApp<OUTGOING_LEN, INCOMING_LEN> {
     /// Obtain a grant for an outgoing packet to be sent over the Radio
     ///
     /// When space is available, this function will return a [`PayloadW`],

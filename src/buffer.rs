@@ -25,15 +25,13 @@ use core::{
 /// # use esb::EsbBuffer;
 /// static BUFFER: EsbBuffer<512, 256> = EsbBuffer::new();
 /// ```
-pub struct EsbBuffer<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
-{
+pub struct EsbBuffer<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> {
     pub(crate) app_to_radio_buf: BBBuffer<OUTGOING_LEN>,
     pub(crate) radio_to_app_buf: BBBuffer<INCOMING_LEN>,
     pub(crate) timer_flag: AtomicBool,
 }
 
-impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbBuffer<OUTGOING_LEN, INCOMING_LEN>
-{
+impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbBuffer<OUTGOING_LEN, INCOMING_LEN> {
     /// Create a new EsbBuffer. This is typically to be done at static scope/lifetime.
     ///
     /// ```rust

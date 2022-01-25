@@ -256,8 +256,7 @@ pub struct PayloadR<const N: usize> {
     grant: FrameGrantR<'static, N>,
 }
 
-impl<const N: usize> PayloadR<N>
-{
+impl<const N: usize> PayloadR<N> {
     /// Create a wrapped Payload Grant from a raw BBQueue Framed Grant
     pub(crate) fn new(raw_grant: FrameGrantR<'static, N>) -> Self {
         Self { grant: raw_grant }
@@ -321,8 +320,7 @@ impl<const N: usize> PayloadR<N>
     }
 }
 
-impl<const N: usize> Deref for PayloadR<N>
-{
+impl<const N: usize> Deref for PayloadR<N> {
     type Target = [u8];
 
     /// Provide read only access to the payload of a grant
@@ -331,8 +329,7 @@ impl<const N: usize> Deref for PayloadR<N>
     }
 }
 
-impl<const N: usize> DerefMut for PayloadR<N>
-{
+impl<const N: usize> DerefMut for PayloadR<N> {
     /// provide read/write access to the payload portion of the grant
     fn deref_mut(&mut self) -> &mut [u8] {
         &mut self.grant[EsbHeader::header_size()..]
@@ -343,8 +340,7 @@ pub struct PayloadW<const N: usize> {
     grant: FrameGrantW<'static, N>,
 }
 
-impl<const N: usize> PayloadW<N>
-{
+impl<const N: usize> PayloadW<N> {
     /// Update the header contained within this grant.
     ///
     /// This can be used to modify the pipe, length, etc. of the
@@ -485,8 +481,7 @@ impl<const N: usize> PayloadW<N>
     }
 }
 
-impl<const N: usize> Deref for PayloadW<N>
-{
+impl<const N: usize> Deref for PayloadW<N> {
     type Target = [u8];
 
     /// provide read only access to the payload portion of the grant
@@ -495,8 +490,7 @@ impl<const N: usize> Deref for PayloadW<N>
     }
 }
 
-impl<const N: usize> DerefMut for PayloadW<N>
-{
+impl<const N: usize> DerefMut for PayloadW<N> {
     /// provide read/write access to the payload portion of the grant
     fn deref_mut(&mut self) -> &mut [u8] {
         &mut self.grant[EsbHeader::header_size()..]
