@@ -6,7 +6,7 @@ description = "Implementation of Nordic's Enhanced ShockBurst communication prot
 
 authors = [
     "Thales Fragoso <thales.fragosoz@gmail.com>",
-    "James Munns <james.munns@ferrous-systems.com>"
+    "James Munns <james@onevariable.com>"
 ]
 
 repository = "https://github.com/thalesfragoso/esb"
