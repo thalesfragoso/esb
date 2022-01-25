@@ -1,6 +1,10 @@
 [package]
 name = "esb"
+
+# TODO: Breaking changes since 0.1.x! Must be updated
+# before release!
 version = "0.1.0"
+
 edition = "2018"
 description = "Implementation of Nordic's Enhanced ShockBurst communication protocol"
 
