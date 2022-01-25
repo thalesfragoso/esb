@@ -43,14 +43,14 @@ use core::{
 ///     timer_flag: AtomicBool::new(false),
 /// };
 /// ```
-pub struct EsbBuffer<const OutgoingLen: usize, const IncomingLen: usize>
+pub struct EsbBuffer<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
 {
-    pub app_to_radio_buf: BBBuffer<OutgoingLen>,
-    pub radio_to_app_buf: BBBuffer<IncomingLen>,
+    pub app_to_radio_buf: BBBuffer<OUTGOING_LEN>,
+    pub radio_to_app_buf: BBBuffer<INCOMING_LEN>,
     pub timer_flag: AtomicBool,
 }
 
-impl<const OutgoingLen: usize, const IncomingLen: usize> EsbBuffer<OutgoingLen, IncomingLen>
+impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbBuffer<OUTGOING_LEN, INCOMING_LEN>
 {
     /// Attempt to split the `static` buffer into handles for Interrupt and App context
     ///
@@ -68,8 +68,8 @@ impl<const OutgoingLen: usize, const IncomingLen: usize> EsbBuffer<OutgoingLen, 
         config: Config,
     ) -> Result<
         (
-            EsbApp<OutgoingLen, IncomingLen>,
-            EsbIrq<T, Disabled, OutgoingLen, IncomingLen>,
+            EsbApp<OUTGOING_LEN, INCOMING_LEN>,
+            EsbIrq<T, Disabled, OUTGOING_LEN, INCOMING_LEN>,
             IrqTimer<T>,
         ),
         Error,

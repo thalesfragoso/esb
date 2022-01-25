@@ -46,17 +46,17 @@ pub(crate) enum RxPayloadState {
     BadCRC,
 }
 
-pub struct EsbRadio<const OutgoingLen: usize, const IncomingLen: usize>
+pub struct EsbRadio<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
 {
     radio: RADIO,
-    tx_grant: Option<PayloadR<OutgoingLen>>,
-    rx_grant: Option<PayloadW<IncomingLen>>,
+    tx_grant: Option<PayloadR<OUTGOING_LEN>>,
+    rx_grant: Option<PayloadW<INCOMING_LEN>>,
     last_crc: [u16; NUM_PIPES],
     last_pid: [u8; NUM_PIPES],
     cached_pipe: u8,
 }
 
-impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, IncomingLen>
+impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbRadio<OUTGOING_LEN, INCOMING_LEN>
 {
     pub(crate) fn new(radio: RADIO) -> Self {
         EsbRadio {
@@ -204,7 +204,7 @@ impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, I
     // --------------- PTX methods --------------- //
 
     // Transmit a packet and setup interrupts.
-    pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
+    pub(crate) fn transmit(&mut self, payload: PayloadR<OUTGOING_LEN>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
             self.radio.shorts.modify(|_, w| w.disabled_rxen().enabled());
@@ -254,7 +254,7 @@ impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, I
 
     // Must be called after the end of TX if the user requested for an ack.
     // Timers must be set accordingly by the upper stack
-    pub(crate) fn prepare_for_ack(&mut self, mut rx_buf: PayloadW<IncomingLen>) {
+    pub(crate) fn prepare_for_ack(&mut self, mut rx_buf: PayloadW<INCOMING_LEN>) {
         self.clear_ready_event();
         // We need a compiler fence here because the DMA will automatically start listening for
         // packets after the ramp-up is completed
@@ -309,7 +309,7 @@ impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, I
     // --------------- PRX methods --------------- //
 
     // Start listening for packets and setup necessary shorts and interrupts
-    pub(crate) fn start_receiving(&mut self, mut rx_buf: PayloadW<IncomingLen>, enabled_pipes: u8) {
+    pub(crate) fn start_receiving(&mut self, mut rx_buf: PayloadW<INCOMING_LEN>, enabled_pipes: u8) {
         // Start TX after receiving a packet as it might need an ack
         self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
 
@@ -340,7 +340,7 @@ impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, I
     #[inline]
     pub(crate) fn check_packet(
         &mut self,
-        consumer: &mut FrameConsumer<'static, OutgoingLen>,
+        consumer: &mut FrameConsumer<'static, OUTGOING_LEN>,
     ) -> Result<RxPayloadState, Error> {
         // If the user didn't provide a packet to send, we will fall back to this empty ack packet
         static FALLBACK_ACK: [u8; 2] = [0, 0];
@@ -450,7 +450,7 @@ impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, I
     // `rx_buf` must only be `None` if a previous call to `check_packet` returned `RepeatedAck`
     pub(crate) fn complete_rx_ack(
         &mut self,
-        mut rx_buf: Option<PayloadW<IncomingLen>>,
+        mut rx_buf: Option<PayloadW<INCOMING_LEN>>,
     ) -> Result<(), Error> {
         let dma_pointer = if let Some(mut grant) = rx_buf.take() {
             let pointer = grant.dma_pointer() as u32;
@@ -483,7 +483,7 @@ impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, I
 
     // Must be called after `check_packet` returns `RxPayloadState::NoAck`.
     // `rx_buf` must only be `None` if a previous call to `check_packet` returned `RepeatedNoAck`
-    pub(crate) fn complete_rx_no_ack(&mut self, mut rx_buf: Option<PayloadW<IncomingLen>>) {
+    pub(crate) fn complete_rx_no_ack(&mut self, mut rx_buf: Option<PayloadW<INCOMING_LEN>>) {
         // Since we're in the no-ack branch, the previous value of `packetptr` still is the last
         // `rx_grant` that we still hold if `check_packet` returned `RepeatedNoAck`. Therefore, we
         // only need to update if `rx_buf` is `Some`.
