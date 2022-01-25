@@ -17,41 +17,41 @@ use core::{
 ///
 /// ## Creating at static scope
 ///
-/// Currently due to lacking const generics, the UX for this
-/// isn't great. You'll probably want something like this:
-///
-/// ## NOTE
-///
-/// Although the members of this struct are public, due to const
-/// generic limitations, they are not intended to be used directly,
-/// outside of `static` creation.
-///
-/// This could cause unintended, though not undefined, behavior.
-///
-/// TL;DR: It's not unsafe, but it's also not going to work correctly.
-///
 /// ```rust
 /// // This creates an ESB storage structure with room for
 /// // 512 bytes of outgoing packets (including headers),
 /// // and 256 bytes of incoming packets (including
 /// // headers).
-/// # use esb::{BBBuffer, EsbBuffer};
-/// # use core::sync::atomic::AtomicBool;
-/// static BUFFER: EsbBuffer<512, 256> = EsbBuffer {
-///     app_to_radio_buf: BBBuffer::new(),
-///     radio_to_app_buf: BBBuffer::new(),
-///     timer_flag: AtomicBool::new(false),
-/// };
+/// # use esb::EsbBuffer;
+/// static BUFFER: EsbBuffer<512, 256> = EsbBuffer::new();
 /// ```
 pub struct EsbBuffer<const OUTGOING_LEN: usize, const INCOMING_LEN: usize>
 {
-    pub app_to_radio_buf: BBBuffer<OUTGOING_LEN>,
-    pub radio_to_app_buf: BBBuffer<INCOMING_LEN>,
-    pub timer_flag: AtomicBool,
+    pub(crate) app_to_radio_buf: BBBuffer<OUTGOING_LEN>,
+    pub(crate) radio_to_app_buf: BBBuffer<INCOMING_LEN>,
+    pub(crate) timer_flag: AtomicBool,
 }
 
 impl<const OUTGOING_LEN: usize, const INCOMING_LEN: usize> EsbBuffer<OUTGOING_LEN, INCOMING_LEN>
 {
+    /// Create a new EsbBuffer. This is typically to be done at static scope/lifetime.
+    ///
+    /// ```rust
+    /// // This creates an ESB storage structure with room for
+    /// // 512 bytes of outgoing packets (including headers),
+    /// // and 256 bytes of incoming packets (including
+    /// // headers).
+    /// # use esb::EsbBuffer;
+    /// static BUFFER: EsbBuffer<512, 256> = EsbBuffer::new();
+    /// ```
+    pub const fn new() -> Self {
+        EsbBuffer {
+            app_to_radio_buf: BBBuffer::new(),
+            radio_to_app_buf: BBBuffer::new(),
+            timer_flag: AtomicBool::new(false),
+        }
+    }
+
     /// Attempt to split the `static` buffer into handles for Interrupt and App context
     ///
     /// This function will only succeed once. If the underlying buffers have also
