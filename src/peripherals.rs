@@ -13,7 +13,7 @@ use nrf52833_pac as pac;
 #[cfg(feature = "52840")]
 use nrf52840_pac as pac;
 
-use bbqueue::{framed::FrameConsumer, ArrayLength};
+use bbqueue::framed::FrameConsumer;
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use crate::{
@@ -46,10 +46,7 @@ pub(crate) enum RxPayloadState {
     BadCRC,
 }
 
-pub struct EsbRadio<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+pub struct EsbRadio<const OutgoingLen: usize, const IncomingLen: usize>
 {
     radio: RADIO,
     tx_grant: Option<PayloadR<OutgoingLen>>,
@@ -59,10 +56,7 @@ where
     cached_pipe: u8,
 }
 
-impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+impl<const OutgoingLen: usize, const IncomingLen: usize> EsbRadio<OutgoingLen, IncomingLen>
 {
     pub(crate) fn new(radio: RADIO) -> Self {
         EsbRadio {

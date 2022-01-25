@@ -30,13 +30,16 @@ nrf52840-pac = { version = "0.10.1", optional = true }
 log = { version = "0.4.8", optional = true }
 
 [dependencies.bbqueue]
-version = "0.4.10"
+version = "0.5.1"
 default-features = false
 
 [features]
 fast-ru = []
-51 = ["nrf51-pac", "bbqueue/thumbv6"]
-52810 = ["nrf52810-pac", "bbqueue/atomic"]
-52832 = ["nrf52832-pac", "bbqueue/atomic"]
-52833 = ["nrf52833-pac", "bbqueue/atomic"]
-52840 = ["nrf52840-pac", "bbqueue/atomic"]
+51 = ["nrf51-pac"]
+52810 = ["nrf52810-pac"]
+52832 = ["nrf52832-pac"]
+52833 = ["nrf52833-pac"]
+52840 = ["nrf52840-pac"]
+
+# TODO: Don't commit!
+default = ["52840"]

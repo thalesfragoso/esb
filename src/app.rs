@@ -5,7 +5,7 @@ use crate::{
 };
 use bbqueue::{
     framed::{FrameConsumer, FrameProducer},
-    ArrayLength, Error as BbqError,
+    Error as BbqError,
 };
 use core::default::Default;
 
@@ -14,10 +14,7 @@ use core::default::Default;
 /// It is intended to be used outside of the `RADIO` interrupt,
 /// and allows for sending or receiving frames from the ESB Radio
 /// hardware.
-pub struct EsbApp<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+pub struct EsbApp<const OutgoingLen: usize, const IncomingLen: usize>
 {
     // TODO(AJM): Make a constructor for this so we don't
     // need to make these fields pub(crate)
@@ -26,10 +23,7 @@ where
     pub(crate) maximum_payload: u8,
 }
 
-impl<OutgoingLen, IncomingLen> EsbApp<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+impl<const OutgoingLen: usize, const IncomingLen: usize> EsbApp<OutgoingLen, IncomingLen>
 {
     /// Obtain a grant for an outgoing packet to be sent over the Radio
     ///

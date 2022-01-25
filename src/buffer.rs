@@ -4,7 +4,7 @@ use crate::{
     peripherals::{EsbRadio, EsbTimer, RADIO},
     Config, Error,
 };
-use bbqueue::{ArrayLength, BBBuffer};
+use bbqueue::BBBuffer;
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
@@ -35,28 +35,22 @@ use core::{
 /// // 512 bytes of outgoing packets (including headers),
 /// // and 256 bytes of incoming packets (including
 /// // headers).
-/// # use esb::{BBBuffer, consts::*, ConstBBBuffer, EsbBuffer};
+/// # use esb::{BBBuffer, EsbBuffer};
 /// # use core::sync::atomic::AtomicBool;
-/// static BUFFER: EsbBuffer<U512, U256> = EsbBuffer {
-///     app_to_radio_buf: BBBuffer( ConstBBBuffer::new() ),
-///     radio_to_app_buf: BBBuffer( ConstBBBuffer::new() ),
+/// static BUFFER: EsbBuffer<512, 256> = EsbBuffer {
+///     app_to_radio_buf: BBBuffer::new(),
+///     radio_to_app_buf: BBBuffer::new(),
 ///     timer_flag: AtomicBool::new(false),
 /// };
 /// ```
-pub struct EsbBuffer<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+pub struct EsbBuffer<const OutgoingLen: usize, const IncomingLen: usize>
 {
     pub app_to_radio_buf: BBBuffer<OutgoingLen>,
     pub radio_to_app_buf: BBBuffer<IncomingLen>,
     pub timer_flag: AtomicBool,
 }
 
-impl<OutgoingLen, IncomingLen> EsbBuffer<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+impl<const OutgoingLen: usize, const IncomingLen: usize> EsbBuffer<OutgoingLen, IncomingLen>
 {
     /// Attempt to split the `static` buffer into handles for Interrupt and App context
     ///
@@ -75,7 +69,7 @@ where
     ) -> Result<
         (
             EsbApp<OutgoingLen, IncomingLen>,
-            EsbIrq<OutgoingLen, IncomingLen, T, Disabled>,
+            EsbIrq<T, Disabled, OutgoingLen, IncomingLen>,
             IrqTimer<T>,
         ),
         Error,

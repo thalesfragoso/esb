@@ -1,8 +1,5 @@
 use crate::Error;
-use bbqueue::{
-    framed::{FrameGrantR, FrameGrantW},
-    ArrayLength,
-};
+use bbqueue::framed::{FrameGrantR, FrameGrantW};
 use core::ops::{Deref, DerefMut};
 
 // | SW USE                        |               ACTUAL DMA PART                                    |
@@ -255,13 +252,11 @@ impl EsbHeader {
 /// been sent FROM the app, and are being read by the RADIO,
 /// or a payload that has send FROM the Radio, and is being
 /// read by the app
-pub struct PayloadR<N: ArrayLength<u8>> {
+pub struct PayloadR<const N: usize> {
     grant: FrameGrantR<'static, N>,
 }
 
-impl<N> PayloadR<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> PayloadR<N>
 {
     /// Create a wrapped Payload Grant from a raw BBQueue Framed Grant
     pub(crate) fn new(raw_grant: FrameGrantR<'static, N>) -> Self {
@@ -326,9 +321,7 @@ where
     }
 }
 
-impl<N> Deref for PayloadR<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> Deref for PayloadR<N>
 {
     type Target = [u8];
 
@@ -338,9 +331,7 @@ where
     }
 }
 
-impl<N> DerefMut for PayloadR<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> DerefMut for PayloadR<N>
 {
     /// provide read/write access to the payload portion of the grant
     fn deref_mut(&mut self) -> &mut [u8] {
@@ -348,13 +339,11 @@ where
     }
 }
 
-pub struct PayloadW<N: ArrayLength<u8>> {
+pub struct PayloadW<const N: usize> {
     grant: FrameGrantW<'static, N>,
 }
 
-impl<N> PayloadW<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> PayloadW<N>
 {
     /// Update the header contained within this grant.
     ///
@@ -496,9 +485,7 @@ where
     }
 }
 
-impl<N> Deref for PayloadW<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> Deref for PayloadW<N>
 {
     type Target = [u8];
 
@@ -508,9 +495,7 @@ where
     }
 }
 
-impl<N> DerefMut for PayloadW<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> DerefMut for PayloadW<N>
 {
     /// provide read/write access to the payload portion of the grant
     fn deref_mut(&mut self) -> &mut [u8] {

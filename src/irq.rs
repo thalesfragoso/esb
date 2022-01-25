@@ -4,10 +4,7 @@ use crate::{
     peripherals::{EsbRadio, EsbTimer, Interrupt, RxPayloadState, NVIC},
     Config, Error, RAMP_UP_TIME,
 };
-use bbqueue::{
-    framed::{FrameConsumer, FrameProducer},
-    ArrayLength,
-};
+use bbqueue::framed::{FrameConsumer, FrameProducer};
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
@@ -73,10 +70,8 @@ impl<T: EsbTimer> IrqTimer<T> {
 /// It is intended to be used inside of the `RADIO` interrupt,
 /// and allows for sending or receiving frames from the Application
 /// hardware.
-pub struct EsbIrq<OutgoingLen, IncomingLen, Timer, STATE>
+pub struct EsbIrq<Timer, STATE, const OutgoingLen: usize, const IncomingLen: usize>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Producer to send incoming frames FROM the radio, TO the application
@@ -112,14 +107,12 @@ struct Events {
     timer: bool,
 }
 
-impl<OutgoingLen, IncomingLen, Timer, STATE> EsbIrq<OutgoingLen, IncomingLen, Timer, STATE>
+impl<Timer, STATE, const OutgoingLen: usize, const IncomingLen: usize> EsbIrq<Timer, STATE, OutgoingLen, IncomingLen>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Puts the driver in the disabled state
-    pub fn into_disabled(mut self) -> EsbIrq<OutgoingLen, IncomingLen, Timer, Disabled> {
+    pub fn into_disabled(mut self) -> EsbIrq<Timer, Disabled, OutgoingLen, IncomingLen> {
         // Put the radio in a known state
         self.radio.stop(true);
         Timer::clear_interrupt_retransmit();
@@ -159,14 +152,12 @@ where
     }
 }
 
-impl<OutgoingLen, IncomingLen, Timer> EsbIrq<OutgoingLen, IncomingLen, Timer, Disabled>
+impl<Timer, const OutgoingLen: usize, const IncomingLen: usize> EsbIrq<Timer, Disabled, OutgoingLen, IncomingLen>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Puts the driver in the PTX mode
-    pub fn into_ptx(self) -> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePTX> {
+    pub fn into_ptx(self) -> EsbIrq<Timer, StatePTX, OutgoingLen, IncomingLen> {
         EsbIrq {
             prod_to_app: self.prod_to_app,
             cons_from_app: self.cons_from_app,
@@ -182,7 +173,7 @@ where
 
     /// Puts the driver in the PRX mode in a idle state, the user must call
     /// [start_receiving](struct.EsbIrq.html#method.start_receiving) to enable the radio for receiving
-    pub fn into_prx(self) -> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePRX> {
+    pub fn into_prx(self) -> EsbIrq<Timer, StatePRX, OutgoingLen, IncomingLen> {
         EsbIrq {
             prod_to_app: self.prod_to_app,
             cons_from_app: self.cons_from_app,
@@ -197,10 +188,8 @@ where
     }
 }
 
-impl<OutgoingLen, IncomingLen, Timer> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePTX>
+impl<Timer, const OutgoingLen: usize, const IncomingLen: usize> EsbIrq<Timer, StatePTX, OutgoingLen, IncomingLen>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Must be called inside the radio interrupt handler
@@ -320,10 +309,8 @@ where
     }
 }
 
-impl<OutgoingLen, IncomingLen, Timer> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePRX>
+impl<Timer, const OutgoingLen: usize, const IncomingLen: usize> EsbIrq<Timer, StatePRX, OutgoingLen, IncomingLen>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Must be called inside the radio interrupt handler

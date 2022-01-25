@@ -101,7 +101,7 @@ pub use crate::{
 
 use core::default::Default;
 // Export dependency items necessary to create a backing structure
-pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
+pub use bbqueue::BBBuffer;
 
 // TODO: Figure it out good values
 const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 120;
